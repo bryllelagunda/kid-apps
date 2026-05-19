@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Crane Stacker</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ff3b6b">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Crane">
+<meta name="mobile-web-app-capable" content="yes">
+
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Lilita+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sky-top: #ffd86b; --sky-bot: #ff8a4c;
+    --ground: #6b3f1f; --grass: #4caf50;
+    --ink: #2a1a0a;    --paper: #fff8e7;
+    --hot: #ff3b6b;    --cool: #2eb8ff;
+    --hazard: #ffce3a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%; width: 100%; overflow: hidden;
+    font-family: 'Fredoka', sans-serif;
+    background: var(--sky-top);
+    user-select: none; touch-action: none;
+    /* Account for iOS notch / safe area */
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  #game {
+    display: block;
+    background: linear-gradient(to bottom,
+      var(--sky-top) 0%, var(--sky-bot) 60%, var(--sky-bot) 78%,
+      var(--grass) 78%, var(--grass) 82%, var(--ground) 82%, var(--ground) 100%);
+  }
+
+  #hud {
+    position: fixed; top: 10px; left: 10px; right: 10px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none; z-index: 5; gap: 8px;
+    top: calc(10px + env(safe-area-inset-top));
+  }
+  .badge {
+    pointer-events: auto;
+    background: var(--paper); border: 4px solid var(--ink);
+    border-radius: 18px; padding: 6px 12px;
+    font-family: 'Lilita One', sans-serif;
+    font-size: 20px; color: var(--ink);
+    box-shadow: 0 4px 0 var(--ink);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .badge small { font-family: 'Fredoka'; font-weight: 500; font-size: 12px; opacity: .75; }
+
+  #modes { pointer-events: auto; display: flex; gap: 5px; flex-wrap: wrap; justify-content: center; }
+  .pill {
+    font-family: 'Lilita One', sans-serif;
+    font-size: 15px; padding: 6px 12px; border-radius: 999px;
+    border: 4px solid var(--ink); cursor: pointer;
+    background: var(--paper); color: var(--ink);
+    box-shadow: 0 4px 0 var(--ink);
+    transition: transform .08s ease;
+  }
+  .pill.active { background: var(--hot); color: var(--paper); }
+  .pill:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
+
+  #right-stack { pointer-events: auto; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  .icon-btn {
+    font-family: 'Lilita One', sans-serif;
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 4px solid var(--ink); background: var(--paper);
+    box-shadow: 0 4px 0 var(--ink); cursor: pointer;
+    font-size: 18px;
+  }
+  .icon-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
+  #sound-btn.muted { background: #ccc; opacity: .7; }
+  .icon-btn.glow {
+    animation: pulseGlow 0.9s ease-in-out infinite;
+    background: var(--hot); color: var(--paper);
+  }
+  @keyframes pulseGlow {
+    0%, 100% { transform: scale(1);    box-shadow: 0 4px 0 var(--ink); }
+    50%      { transform: scale(1.15); box-shadow: 0 4px 0 var(--ink), 0 0 18px rgba(255,59,107,0.7); }
+  }
+
+  #controls-left {
+    position: fixed; bottom: 16px; left: 16px;
+    display: flex; gap: 10px; z-index: 5;
+    pointer-events: auto;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  .dir-btn {
+    font-family: 'Lilita One', sans-serif;
+    width: 78px; height: 78px; border-radius: 22px;
+    border: 5px solid var(--ink); background: var(--cool); color: var(--paper);
+    box-shadow: 0 6px 0 var(--ink); cursor: pointer;
+    font-size: 38px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: none;
+  }
+  .dir-btn.active, .dir-btn:active {
+    transform: translateY(3px); box-shadow: 0 3px 0 var(--ink);
+  }
+
+  #drop-btn {
+    position: fixed; bottom: 16px; right: 16px;
+    pointer-events: auto;
+    font-family: 'Lilita One', sans-serif;
+    font-size: 26px; padding: 22px 30px;
+    border-radius: 24px; border: 5px solid var(--ink);
+    background: var(--hot); color: var(--paper);
+    box-shadow: 0 6px 0 var(--ink);
+    cursor: pointer; letter-spacing: 1px; z-index: 5;
+    min-width: 110px;
+    bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+  #drop-btn:active { transform: translateY(3px); box-shadow: 0 3px 0 var(--ink); }
+
+  @media (max-width: 480px) {
+    .badge { font-size: 16px; padding: 5px 9px; }
+    .pill { font-size: 13px; padding: 5px 9px; }
+    .icon-btn { width: 36px; height: 36px; font-size: 16px; }
+    .dir-btn { width: 64px; height: 64px; font-size: 30px; border-radius: 18px; }
+    #drop-btn { font-size: 22px; padding: 18px 22px; min-width: 90px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud">
+  <div class="badge"><span id="score">0</span><small>stacked</small></div>
+  <div id="modes">
+    <button class="pill active" data-mode="satpin">SATPIN</button>
+    <button class="pill" data-mode="letters">A–Z</button>
+    <button class="pill" data-mode="numbers">0–9</button>
+  </div>
+  <div id="right-stack">
+    <button id="sound-btn" class="icon-btn" title="Sound">🔊</button>
+    <button id="reset-btn" class="icon-btn" title="Reset">↺</button>
+    <div class="badge"><span id="height">0</span><small>tall</small></div>
+  </div>
+</div>
+
+<div id="controls-left">
+  <button id="up-btn"   class="dir-btn">↑</button>
+  <button id="down-btn" class="dir-btn">↓</button>
+</div>
+
+<button id="drop-btn">DROP</button>
+
+<script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+<script>
+(() => {
+  const { Engine, Bodies, Body, Composite, Events } = Matter;
+
+  // Letter NAMES (not phonetic sounds) — default browser TTS pronounces single
+  // letters as their names, so we pass the label through directly.
+  const NUM = ['zero','one','two','three','four','five','six','seven','eight','nine'];
+
+  let soundOn = true, audioUnlocked = false;
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    if ('speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance(' '); u.volume = 0;
+      speechSynthesis.speak(u);
+    }
+    audioUnlocked = true;
+  }
+  ['pointerdown','touchstart','keydown'].forEach(ev =>
+    document.addEventListener(ev, unlockAudio, { once: true, passive: true })
+  );
+
+  function speak(label) {
+    if (!soundOn || !('speechSynthesis' in window)) return;
+    const t = /[0-9]/.test(label) ? NUM[+label] : label;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(t);
+    u.rate = 0.9; u.pitch = 1.15; u.volume = 1.0;
+    speechSynthesis.speak(u);
+  }
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0;
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    rebuildWorldBounds();
+  }
+  window.addEventListener('resize', resize);
+
+  const engine = Engine.create();
+  engine.gravity.y = 1.0;
+  const world = engine.world;
+
+  const BLOCK = 60;
+  const CRANE_Y = 70;
+  const CABLE_MIN = 18;
+  const CABLE_SPEED_DOWN = 3.2;
+  const CABLE_SPEED_UP   = 5.0;
+  const CABLE_RETRACT_SPEED = 14;
+  const PALETTE = ['#ff3b6b', '#2eb8ff', '#ffce3a', '#43e6a5', '#a86bff', '#ff8a4c', '#ff6fa3', '#6dd5ff'];
+
+  let ground, leftWall, rightWall;
+  function rebuildWorldBounds() {
+    if (ground) Composite.remove(world, [ground, leftWall, rightWall]);
+    ground    = Bodies.rectangle(W/2, H - H*0.09, W*2, 60, { isStatic: true, label: 'ground', friction: 0.9 });
+    leftWall  = Bodies.rectangle(-30, H/2, 60, H*2, { isStatic: true, label: 'wall' });
+    rightWall = Bodies.rectangle(W+30, H/2, 60, H*2, { isStatic: true, label: 'wall' });
+    Composite.add(world, [ground, leftWall, rightWall]);
+  }
+  resize();
+  function groundTopY() { return H - H*0.09 - 30; }
+
+  let craneX = window.innerWidth / 2;
+  let cableLength = CABLE_MIN;
+  let cableRetracting = false;
+  let mode = 'satpin';
+
+  const labels = {
+    satpin:  ['S','A','T','P','I','N'],
+    letters: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
+    numbers: '0123456789'.split(''),
+  };
+
+  let pending = null;
+  let towerFull = false;
+  let towerFullFrames = 0;
+  function pickLabel() { const a = labels[mode]; return a[Math.floor(Math.random()*a.length)]; }
+  function pickColor(prev) {
+    let c;
+    do { c = PALETTE[Math.floor(Math.random() * PALETTE.length)]; } while (c === prev);
+    return c;
+  }
+  function spawnAreaBlocked() {
+    // Would the new pending block overlap any existing block at the spawn position?
+    const spawnX = craneX;
+    const spawnY = CRANE_Y + CABLE_MIN + BLOCK/2;
+    const halfW = BLOCK/2 - 2;
+    const halfH = BLOCK/2 - 2;
+    const blocks = Composite.allBodies(world).filter(b => b.label === 'block');
+    for (const b of blocks) {
+      if (b.bounds.max.x < spawnX - halfW) continue;
+      if (b.bounds.min.x > spawnX + halfW) continue;
+      if (b.bounds.max.y < spawnY - halfH) continue;
+      if (b.bounds.min.y > spawnY + halfH) continue;
+      return true;
+    }
+    return false;
+  }
+  function spawnPending() {
+    cableLength = CABLE_MIN;
+    if (spawnAreaBlocked()) {
+      pending = null;
+      if (!towerFull) { towerFull = true; towerFullFrames = 0; updateTowerFullUI(); }
+      return;
+    }
+    if (towerFull) { towerFull = false; updateTowerFullUI(); }
+    pending = { label: pickLabel(), color: pickColor(pending && pending.color) };
+  }
+  function updateTowerFullUI() {
+    const r = document.getElementById('reset-btn');
+    if (r) r.classList.toggle('glow', towerFull);
+  }
+  spawnPending();
+
+  function surfaceYAt(x, halfW) {
+    let surface = groundTopY();
+    const blocks = Composite.allBodies(world).filter(b => b.label === 'block');
+    for (const b of blocks) {
+      const overlap = !(b.bounds.max.x < x - halfW + 4 || b.bounds.min.x > x + halfW - 4);
+      if (overlap && b.bounds.min.y < surface) surface = b.bounds.min.y;
+    }
+    return surface;
+  }
+
+  function releaseBlock() {
+    if (!pending) return;
+    const blockY = CRANE_Y + cableLength + BLOCK/2;
+    const body = Bodies.rectangle(craneX, blockY, BLOCK, BLOCK, {
+      restitution: 0.05, friction: 0.95, frictionStatic: 1.2,
+      density: 0.004, chamfer: { radius: 6 }, label: 'block',
+    });
+    body.brick = { label: pending.label, color: pending.color };
+    Composite.add(world, body);
+    speak(pending.label);
+    pending = null;
+    cableRetracting = true;
+  }
+
+  const keys = {};
+  let upHeld = false, downHeld = false;
+
+  window.addEventListener('keydown', (e) => {
+    keys[e.key] = true;
+    if (e.key === ' ' || e.key === 'Enter') { releaseBlock(); e.preventDefault(); }
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') e.preventDefault();
+  });
+  window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+  function getXY(ev) {
+    const t = ev.touches ? ev.touches[0] : ev;
+    const rect = canvas.getBoundingClientRect();
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+  }
+
+  let pressStart = null, dragging = false;
+  function onDown(ev) {
+    const p = getXY(ev);
+    pressStart = { x: p.x, y: p.y, t: Date.now() };
+    dragging = true;
+    craneX = Math.max(60, Math.min(W - 60, p.x));
+    if (ev.cancelable) ev.preventDefault();
+  }
+  function onMove(ev) {
+    if (!dragging) return;
+    const p = getXY(ev);
+    craneX = Math.max(60, Math.min(W - 60, p.x));
+    if (ev.cancelable) ev.preventDefault();
+  }
+  function onUp(ev) {
+    if (pressStart) {
+      const p = ev.changedTouches ? ev.changedTouches[0] : ev;
+      const rect = canvas.getBoundingClientRect();
+      const ux = p.clientX - rect.left, uy = p.clientY - rect.top;
+      const dx = Math.abs(ux - pressStart.x), dy = Math.abs(uy - pressStart.y);
+      const dt = Date.now() - pressStart.t;
+      if (dx < 6 && dy < 6 && dt < 350) {
+        const blocks = Composite.allBodies(world).filter(b => b.label === 'block');
+        for (const b of blocks) {
+          if (ux > b.bounds.min.x && ux < b.bounds.max.x &&
+              uy > b.bounds.min.y && uy < b.bounds.max.y) {
+            speak(b.brick.label);
+            break;
+          }
+        }
+      }
+    }
+    pressStart = null; dragging = false;
+  }
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('touchstart', onDown, { passive: false });
+  canvas.addEventListener('touchmove',  onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+
+  function bindHold(btn, setActive) {
+    let on = false;
+    const start = (ev) => { on = true; setActive(true); btn.classList.add('active'); if (ev.cancelable) ev.preventDefault(); };
+    const end = () => { if (on) { on = false; setActive(false); btn.classList.remove('active'); } };
+    btn.addEventListener('mousedown', start);
+    btn.addEventListener('mouseup', end);
+    btn.addEventListener('mouseleave', end);
+    btn.addEventListener('touchstart', start, { passive: false });
+    btn.addEventListener('touchend', end);
+    btn.addEventListener('touchcancel', end);
+  }
+  bindHold(document.getElementById('up-btn'),   v => upHeld = v);
+  bindHold(document.getElementById('down-btn'), v => downHeld = v);
+
+  document.getElementById('drop-btn').addEventListener('click', () => releaseBlock());
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    const all = Composite.allBodies(world).filter(b => b.label === 'block');
+    Composite.remove(world, all);
+    pending = null; cableRetracting = false; cableLength = CABLE_MIN;
+    towerFull = false; towerFullFrames = 0; updateTowerFullUI();
+    spawnPending();
+    score = 0; updateHud();
+  });
+
+  document.querySelectorAll('.pill').forEach(p => {
+    p.addEventListener('click', () => {
+      document.querySelectorAll('.pill').forEach(x => x.classList.remove('active'));
+      p.classList.add('active');
+      mode = p.dataset.mode;
+      if (pending) spawnPending();
+    });
+  });
+
+  const soundBtn = document.getElementById('sound-btn');
+  soundBtn.addEventListener('click', () => {
+    soundOn = !soundOn;
+    soundBtn.textContent = soundOn ? '🔊' : '🔇';
+    soundBtn.classList.toggle('muted', !soundOn);
+    if (!soundOn && 'speechSynthesis' in window) speechSynthesis.cancel();
+  });
+
+  let score = 0;
+  function updateHud() {
+    document.getElementById('score').textContent = score;
+    const gY = groundTopY();
+    let highest = gY;
+    const blocks = Composite.allBodies(world).filter(b => b.label === 'block');
+    for (const b of blocks) if (b.position.y < highest) highest = b.position.y;
+    document.getElementById('height').textContent = Math.max(0, Math.round((gY - highest) / BLOCK));
+  }
+
+  Events.on(engine, 'afterUpdate', () => {
+    const removed = [];
+    for (const b of Composite.allBodies(world))
+      if (b.label === 'block' && (b.position.y > H + 200 || b.position.y < -300)) removed.push(b);
+    if (removed.length) Composite.remove(world, removed);
+  });
+
+  const blockState = new WeakMap();
+  function trackLandings() {
+    const blocks = Composite.allBodies(world).filter(b => b.label === 'block');
+    for (const b of blocks) {
+      let st = blockState.get(b);
+      if (!st) { st = { restFrames: 0, counted: false }; blockState.set(b, st); }
+      const v = Math.hypot(b.velocity.x, b.velocity.y);
+      const w = Math.abs(b.angularVelocity);
+      if (v < 0.2 && w < 0.02) st.restFrames++; else st.restFrames = 0;
+      if (!st.counted && st.restFrames > 20) { st.counted = true; score++; updateHud(); }
+    }
+  }
+
+  function updateCable() {
+    if (cableRetracting) {
+      cableLength -= CABLE_RETRACT_SPEED;
+      if (cableLength <= CABLE_MIN) {
+        cableLength = CABLE_MIN;
+        cableRetracting = false;
+        spawnPending();
+      }
+      return;
+    }
+    if (!pending) return;
+    const goingDown = keys['ArrowDown'] || downHeld;
+    const goingUp   = keys['ArrowUp']   || upHeld;
+    if (goingDown) cableLength += CABLE_SPEED_DOWN;
+    if (goingUp)   cableLength -= CABLE_SPEED_UP;
+    if (cableLength < CABLE_MIN) cableLength = CABLE_MIN;
+    const surface = surfaceYAt(craneX, BLOCK/2);
+    const blockBottom = CRANE_Y + cableLength + BLOCK;
+    if (blockBottom >= surface) {
+      cableLength = Math.max(CABLE_MIN, surface - CRANE_Y - BLOCK);
+      releaseBlock();
+    }
+  }
+
+  let last = performance.now();
+  function loop(now) {
+    const dt = Math.min(32, now - last); last = now;
+    const KS = 7;
+    if (keys['ArrowLeft']  || keys['a'] || keys['A']) craneX -= KS;
+    if (keys['ArrowRight'] || keys['d'] || keys['D']) craneX += KS;
+    craneX = Math.max(60, Math.min(W - 60, craneX));
+    Engine.update(engine, dt);
+    updateCable();
+    trackLandings();
+    // If the tower was full, periodically retry spawning — maybe blocks shifted
+    if (towerFull && !cableRetracting) {
+      towerFullFrames++;
+      if (towerFullFrames > 45) { towerFullFrames = 0; spawnPending(); }
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.beginPath();
+    c.moveTo(x+r, y);
+    c.arcTo(x+w, y,   x+w, y+h, r);
+    c.arcTo(x+w, y+h, x,   y+h, r);
+    c.arcTo(x,   y+h, x,   y,   r);
+    c.arcTo(x,   y,   x+w, y,   r);
+    c.closePath();
+  }
+  function darken(hex, amount) {
+    const n = parseInt(hex.slice(1), 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    r = Math.max(0, r - amount); g = Math.max(0, g - amount); b = Math.max(0, b - amount);
+    return `rgb(${r},${g},${b})`;
+  }
+
+  function drawBlock(x, y, angle, size, color, label) {
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(angle);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    roundRect(ctx, -size/2 + 3, -size/2 + 4, size, size, 8); ctx.fill();
+
+    const studW = size * 0.20, studH = size * 0.16, studGap = size * 0.16;
+    const studColor = darken(color, 18);
+    ctx.fillStyle = studColor;
+    roundRect(ctx, -studGap/2 - studW, -size/2 - studH + 2, studW, studH, 3); ctx.fill();
+    ctx.strokeStyle = '#2a1a0a'; ctx.lineWidth = 3;
+    roundRect(ctx, -studGap/2 - studW, -size/2 - studH + 2, studW, studH, 3); ctx.stroke();
+    ctx.fillStyle = studColor;
+    roundRect(ctx, studGap/2, -size/2 - studH + 2, studW, studH, 3); ctx.fill();
+    roundRect(ctx, studGap/2, -size/2 - studH + 2, studW, studH, 3); ctx.stroke();
+
+    ctx.fillStyle = color;
+    roundRect(ctx, -size/2, -size/2, size, size, 8); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    roundRect(ctx, -size/2 + 4, -size/2 + 4, size - 8, size/3, 5); ctx.fill();
+    ctx.fillStyle = '#2a1a0a';
+    ctx.font = 'bold ' + Math.round(size*0.55) + "px 'Lilita One', sans-serif";
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, 0, 2);
+    ctx.strokeStyle = '#2a1a0a'; ctx.lineWidth = 3;
+    roundRect(ctx, -size/2, -size/2, size, size, 8); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawMagnet(x, y) {
+    ctx.save(); ctx.translate(x, y);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    roundRect(ctx, -22, 2, 44, 12, 3); ctx.fill();
+    ctx.fillStyle = '#c0392b';
+    roundRect(ctx, -22, 0, 14, 12, 3); ctx.fill();
+    roundRect(ctx,   8, 0, 14, 12, 3); ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-8, 0, 16, 12);
+    ctx.strokeStyle = '#2a1a0a'; ctx.lineWidth = 2.5;
+    roundRect(ctx, -22, 0, 44, 12, 3); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = "bold 9px 'Lilita One', sans-serif";
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('N', -15, 6); ctx.fillText('S', 15, 6);
+    ctx.restore();
+  }
+
+  function drawClouds(t) {
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    const positions = [
+      { x: (W*0.15 + t*0.01)  % (W+200) - 100, y: H*0.18, r: 28 },
+      { x: (W*0.55 + t*0.008) % (W+200) - 100, y: H*0.10, r: 36 },
+      { x: (W*0.85 + t*0.012) % (W+200) - 100, y: H*0.25, r: 22 },
+    ];
+    for (const p of positions) {
+      ctx.beginPath();
+      ctx.arc(p.x,     p.y,    p.r,     0, Math.PI*2);
+      ctx.arc(p.x+p.r, p.y+4,  p.r*0.8, 0, Math.PI*2);
+      ctx.arc(p.x-p.r, p.y+6,  p.r*0.7, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  function drawCrane() {
+    ctx.fillStyle = '#2a1a0a';
+    ctx.fillRect(0, CRANE_Y - 8, W, 6);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    for (let i = 0; i < W; i += 24) ctx.fillRect(i, CRANE_Y - 8, 10, 6);
+
+    ctx.save();
+    ctx.translate(craneX, CRANE_Y);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    roundRect(ctx, -40, -20, 84, 26, 6); ctx.fill();
+    ctx.fillStyle = '#2a1a0a';
+    roundRect(ctx, -42, -22, 84, 26, 6); ctx.fill();
+
+    ctx.save();
+    ctx.beginPath();
+    roundRect(ctx, -38, -18, 76, 18, 4);
+    ctx.clip();
+    ctx.fillStyle = '#ffce3a';
+    ctx.fillRect(-38, -18, 76, 18);
+    ctx.fillStyle = '#2a1a0a';
+    for (let i = -50; i < 50; i += 12) {
+      ctx.beginPath();
+      ctx.moveTo(i, -18); ctx.lineTo(i + 6, -18);
+      ctx.lineTo(i + 12, 0); ctx.lineTo(i + 6, 0);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.fillStyle = '#2a1a0a';
+    ctx.beginPath(); ctx.arc(-26, -16, 7, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( 26, -16, 7, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-26, -16, 2.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( 26, -16, 2.5, 0, Math.PI*2); ctx.fill();
+
+    ctx.strokeStyle = '#2a1a0a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(0, 4); ctx.lineTo(0, cableLength); ctx.stroke();
+    ctx.restore();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    drawClouds(performance.now());
+
+    for (const b of Composite.allBodies(world).filter(b => b.label === 'block'))
+      drawBlock(b.position.x, b.position.y, b.angle, BLOCK, b.brick.color, b.brick.label);
+
+    drawCrane();
+
+    if (pending) {
+      const magY = CRANE_Y + cableLength;
+      drawMagnet(craneX, magY);
+      drawBlock(craneX, magY + 6 + BLOCK/2, 0, BLOCK, pending.color, pending.label);
+    } else if (cableRetracting) {
+      drawMagnet(craneX, CRANE_Y + cableLength);
+    }
+  }
+
+  requestAnimationFrame(loop);
+})();
+</script>
+
+<!-- Service worker registration for PWA / offline -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('service-worker.js')
+        .catch(err => console.warn('Service worker registration failed:', err));
+    });
+  }
+</script>
+</body>
+</html>

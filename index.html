@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Apps</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#ff3b6b">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Apps">
+
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Lilita+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sky-top: #ffd86b;
+    --sky-bot: #ff8a4c;
+    --ink: #2a1a0a;
+    --paper: #fff8e7;
+    --hot: #ff3b6b;
+    --cool: #2eb8ff;
+    --mint: #43e6a5;
+    --grape: #a86bff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    min-height: 100%;
+    font-family: 'Fredoka', sans-serif;
+    background: linear-gradient(to bottom, var(--sky-top), var(--sky-bot));
+    background-attachment: fixed;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+  body {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    min-height: 100vh;
+  }
+  header {
+    padding: 36px 24px 12px;
+    text-align: center;
+  }
+  h1 {
+    font-family: 'Lilita One', sans-serif;
+    font-size: 48px;
+    color: var(--ink);
+    letter-spacing: 2px;
+  }
+  .subtitle {
+    font-size: 17px;
+    font-weight: 500;
+    opacity: 0.7;
+    margin-top: 4px;
+  }
+  main {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 22px;
+    padding: 28px 24px 48px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .tile {
+    aspect-ratio: 1 / 1;
+    background: var(--paper);
+    border: 6px solid var(--ink);
+    border-radius: 28px;
+    box-shadow: 0 8px 0 var(--ink);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    text-decoration: none;
+    color: var(--ink);
+    transition: transform .12s ease, box-shadow .12s ease;
+    cursor: pointer;
+  }
+  .tile:hover { transform: translateY(-2px); box-shadow: 0 10px 0 var(--ink); }
+  .tile:active { transform: translateY(4px); box-shadow: 0 4px 0 var(--ink); }
+  .tile-icon {
+    width: 62%;
+    aspect-ratio: 1;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 5px solid var(--ink);
+    box-shadow: 0 4px 0 var(--ink);
+    margin-bottom: 18px;
+    background: var(--sky-top);
+  }
+  .tile-icon img {
+    width: 100%; height: 100%;
+    display: block; object-fit: cover;
+  }
+  .tile-label {
+    font-family: 'Lilita One', sans-serif;
+    font-size: 22px;
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+
+  /* Placeholder "Coming Soon" tile */
+  .tile-locked {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .tile-locked:hover { transform: none; box-shadow: 0 8px 0 var(--ink); }
+  .tile-locked .tile-icon {
+    background: repeating-linear-gradient(45deg, var(--cool), var(--cool) 10px, var(--mint) 10px, var(--mint) 20px);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--paper);
+    font-family: 'Lilita One', sans-serif;
+    font-size: 44px;
+    text-shadow: 0 2px 0 var(--ink);
+  }
+
+  @media (max-width: 480px) {
+    header { padding-top: 24px; }
+    h1 { font-size: 36px; }
+    .subtitle { font-size: 14px; }
+    main { gap: 14px; padding: 18px; }
+    .tile { padding: 16px; border-width: 5px; border-radius: 22px; }
+    .tile-label { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Apps</h1>
+  <div class="subtitle">Pick a game!</div>
+</header>
+
+<main id="apps">
+  <a href="./crane-stacker/" class="tile" aria-label="Crane Stacker">
+    <div class="tile-icon"><img src="./crane-stacker/icon-512.png" alt=""></div>
+    <div class="tile-label">Crane Stacker</div>
+  </a>
+
+  <!-- Remove or replace this when the next app is ready -->
+  <div class="tile tile-locked" aria-hidden="true">
+    <div class="tile-icon">?</div>
+    <div class="tile-label">Coming Soon</div>
+  </div>
+</main>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
