@@ -90,6 +90,16 @@
     50%      { transform: scale(1.15); box-shadow: 0 4px 0 var(--ink), 0 0 18px rgba(255,59,107,0.7); }
   }
 
+  .sound-mode-btn {
+    font-family: 'Lilita One', sans-serif;
+    font-size: 13px; padding: 5px 9px; border-radius: 14px;
+    border: 4px solid var(--ink); cursor: pointer;
+    background: var(--paper); color: var(--ink);
+    box-shadow: 0 4px 0 var(--ink); pointer-events: auto;
+  }
+  .sound-mode-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
+  .sound-mode-btn.phonics-active { background: var(--cool); color: var(--paper); }
+
   #controls-left {
     position: fixed; bottom: 16px; left: 16px;
     display: flex; gap: 10px; z-index: 5;
@@ -139,6 +149,7 @@
     /* Smaller pills so all 3 stay on one row and HUD height stays ~36px */
     .pill { font-size: 11px; padding: 4px 7px; }
     .icon-btn { width: 36px; height: 36px; font-size: 16px; }
+    .sound-mode-btn { font-size: 11px; padding: 4px 6px; }
     .dir-btn { width: 64px; height: 64px; font-size: 30px; border-radius: 18px; }
     #drop-btn { font-size: 22px; padding: 18px 22px; min-width: 90px; }
 
@@ -167,6 +178,7 @@
   </div>
   <div id="right-stack">
     <button id="sound-btn" class="icon-btn" aria-label="Sound on" title="Sound">🔊</button>
+    <button id="phon-btn" class="sound-mode-btn" aria-label="Sound: Letter Names" title="Toggle: Letter Names / Phonics-ish">Aa</button>
     <button id="reset-btn" class="icon-btn" title="Reset">↺</button>
     <div class="badge" id="tall-badge"><span id="height">0</span><small>tall</small></div>
   </div>
@@ -184,11 +196,65 @@
 (() => {
   const { Engine, Bodies, Body, Composite, Events } = Matter;
 
-  // Letter NAMES (not phonetic sounds) — default browser TTS pronounces single
-  // letters as their names, so we pass the label through directly.
   const NUM = ['zero','one','two','three','four','five','six','seven','eight','nine'];
 
+  // Explicit letter-name lookup for consistent TTS output across devices.
+  const LETTER_NAMES = {
+    A:'ay',  B:'bee',  C:'see',  D:'dee',  E:'ee',   F:'eff',
+    G:'jee', H:'aitch',I:'eye', J:'jay',  K:'kay',  L:'el',
+    M:'em',  N:'en',  O:'oh',   P:'pee',  Q:'cue',  R:'ar',
+    S:'ess', T:'tee', U:'you',  V:'vee',  W:'double-u', X:'ex',
+    Y:'why', Z:'zee'
+  };
+
+  // Phonics-ish approximations for browser TTS.
+  // NOTE: browser TTS phonics are inherently approximate — NOT true recorded phonemes.
+  // For accurate early-reading phonics, replace with recorded audio files (one mp3 per letter).
+  const PHONICS_MAP = {
+    // SATPIN core set
+    S:'sss', A:'ah', T:'t', P:'p', I:'ih', N:'nnn',
+    // Rest of A-Z — best-effort approximations only
+    B:'buh', C:'kuh', D:'duh', E:'eh',  F:'fff', G:'guh',
+    H:'huh', J:'juh', K:'kuh', L:'lll', M:'mmm', O:'oh',
+    Q:'kwuh', R:'rrr', U:'uh',  V:'vvv', W:'wuh', X:'ksss',
+    Y:'yuh', Z:'zzz'
+  };
+
+  // TTS voice settings — tune here if the voice sounds too fast or robotic
+  const SPEAK_RATE  = 0.9;
+  const SPEAK_PITCH = 1.15;
+
+  let preferredVoice = null;
+  function selectVoice() {
+    if (!('speechSynthesis' in window)) return;
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return;
+    // Prefer clear, natural-sounding English voices in order
+    const prefs = [
+      'Samantha',                  // macOS / iOS US female
+      'Karen',                     // macOS AU female
+      'Google UK English Female',
+      'Microsoft Zira Desktop',    // Windows US female
+      'Microsoft Hazel Desktop',   // Windows UK female
+    ];
+    for (const name of prefs) {
+      const v = voices.find(v => v.name === name);
+      if (v) { preferredVoice = v; return; }
+    }
+    // Fallback: first en-US / en-GB / en-AU regional voice
+    const regional = voices.find(v => /^en-(US|GB|AU)/.test(v.lang));
+    if (regional) { preferredVoice = regional; return; }
+    // Last resort: any English voice
+    const anyEn = voices.find(v => v.lang.startsWith('en'));
+    if (anyEn) preferredVoice = anyEn;
+  }
+  if ('speechSynthesis' in window) {
+    speechSynthesis.addEventListener('voiceschanged', selectVoice);
+    selectVoice(); // works immediately on some browsers
+  }
+
   let soundOn = true, audioUnlocked = false;
+  let soundMode = 'names'; // 'names' | 'phonics'
   function unlockAudio() {
     if (audioUnlocked) return;
     if ('speechSynthesis' in window) {
@@ -203,10 +269,18 @@
 
   function speak(label) {
     if (!soundOn || !('speechSynthesis' in window)) return;
-    const t = /[0-9]/.test(label) ? NUM[+label] : label;
+    let text;
+    if (/[0-9]/.test(label)) {
+      text = NUM[+label];
+    } else if (soundMode === 'phonics') {
+      text = PHONICS_MAP[label] || LETTER_NAMES[label] || label;
+    } else {
+      text = LETTER_NAMES[label] || label;
+    }
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(t);
-    u.rate = 0.9; u.pitch = 1.15; u.volume = 1.0;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = SPEAK_RATE; u.pitch = SPEAK_PITCH; u.volume = 1.0;
+    if (preferredVoice) u.voice = preferredVoice;
     speechSynthesis.speak(u);
   }
 
@@ -416,6 +490,15 @@
     soundBtn.classList.toggle('muted', !soundOn);
     soundBtn.setAttribute('aria-label', soundOn ? 'Sound on' : 'Sound off');
     if (!soundOn && 'speechSynthesis' in window) speechSynthesis.cancel();
+  });
+
+  const phonBtn = document.getElementById('phon-btn');
+  phonBtn.addEventListener('click', () => {
+    soundMode = soundMode === 'names' ? 'phonics' : 'names';
+    const isPhonics = soundMode === 'phonics';
+    phonBtn.textContent = isPhonics ? 'Ph' : 'Aa';
+    phonBtn.classList.toggle('phonics-active', isPhonics);
+    phonBtn.setAttribute('aria-label', isPhonics ? 'Sound: Phonics-ish' : 'Sound: Letter Names');
   });
 
   let score = 0;

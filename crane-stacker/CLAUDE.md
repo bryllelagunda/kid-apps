@@ -4,7 +4,7 @@
 
 A phonics/literacy crane stacking game for a 4-year-old. Built as a Progressive Web App so it installs to a tablet home screen and runs offline.
 
-- **Current version:** 3.1
+- **Current version:** 3.3
 - **Production URL:** https://apps.bryllelagunda.com/cranewithkid/
 - **Hosting:** cPanel-based static hosting; deploys via File Manager upload; HTTPS via Let's Encrypt
 - **Operator:** Parent. Communicates in plain English about design choices. Has not been editing code by hand — Claude Code is expected to perform end-to-end changes. Has a separate Claude chat session for strategic/design conversations; this codebase is for execution.
@@ -46,8 +46,13 @@ Rationale: parent uploads via cPanel File Manager; any build complexity breaks t
 - Blocks have **two visible LEGO studs** on top, in a darker shade of the block color. Matches the kid's physical LEGO interest. Drawn before the block body so the body covers their bases.
 - Crane trolley: **hazard-striped (yellow + black)** with wheels and a clipped diagonal pattern.
 - Hook: **red-and-black electromagnet** bar with "N" and "S" labels. Visible on pending block and during cable retract.
-- **Letter NAMES via TTS** ("S" → "ess", "A" → "ay"), NOT phonetic sounds. We tried phonics — browser TTS can't produce clean phonemes, and the parent prefers names regardless. Numbers spoken as their names ("one", "two").
-- **Default mode is SATPIN** (the letters S A T P I N). Originally chosen for phonics density; kept after the phonics pivot because it's still a useful 6-letter starter pool.
+- **Two sound modes** selectable via a small "Aa / Ph" toggle in the HUD (parent-facing):
+  - **Letter Names** (default, "Aa" label): speaks the letter's name — "S" → "ess", "A" → "ay", "T" → "tee". Explicit `LETTER_NAMES` map ensures consistency across TTS engines.
+  - **Phonics-ish** ("Ph" label, blue highlight): speaks approximate phonics sounds — S→"sss", A→"ah", T→"t", P→"p", I→"ih", N→"nnn"; rest of A-Z via best-effort map. **This is experimental.** Browser TTS produces approximate phonics only — NOT true recorded phonemes. For accurate early-reading phonics, the right solution is recorded audio files (one mp3 per letter).
+- **Numbers always speak their names** in both modes ("one", "two", etc.).
+- **Letter Names is the default** and the recommended mode. Phonics-ish is available for experimentation.
+- **Voice selection**: `selectVoice()` picks the best available English voice at startup (prefers Samantha / Karen / Google UK English Female / Microsoft Zira). Falls back to any `en-US/GB/AU` voice, then any English voice. Rate and pitch are in `SPEAK_RATE` / `SPEAK_PITCH` constants at the top of the script.
+- **Default mode is SATPIN** (the letters S A T P I N). Originally chosen for phonics density; kept because it's a useful 6-letter starter pool.
 - **No prose hints on the play screen**. The visible buttons are the documentation.
 
 ### Physics tuning
@@ -66,7 +71,7 @@ Reduces chaos-frustration without removing the topple-and-balance lesson.
 
 - Don't add a build tool, bundler, transpiler, or framework.
 - Don't add npm dependencies. Everything via CDN, cached by service worker.
-- Don't switch letter names back to phonetic sounds without explicit ask.
+- Don't change the default sound mode away from Letter Names without explicit ask.
 - Don't add ads, analytics, or external network calls.
 - Don't make controls more complex — 4-year-old's game.
 - Don't auto-clear the kid's tower except via explicit reset.
@@ -91,6 +96,7 @@ All paths in the project are relative (`./icon-192.png` etc.), so subpath hostin
 - **V3**: Replaced one-shot DROP with hold-↓-to-lower-cable + auto-release on contact. Magnet hook.
 - **V3 PWA**: manifest + service worker + icons + README. Deployable.
 - **V3.1**: Fixed spawn-into-stack feedback loop (kid played past the design ceiling). Switched TTS from phonetic sounds to letter names. Added reset-button glow when tower full. Cull off-screen blocks (above and below).
+- **V3.3**: Improved voice selection (prefers Samantha/Karen/Google UK English Female). Explicit LETTER_NAMES map for consistent TTS. Added Phonics-ish mode (experimental) with parent toggle "Aa/Ph" button in HUD.
 
 ## Possible future features (queued, NOT committed — confirm with parent first)
 
