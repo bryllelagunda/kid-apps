@@ -98,7 +98,7 @@
     box-shadow: 0 4px 0 var(--ink); pointer-events: auto;
   }
   .sound-mode-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
-  .sound-mode-btn.phonics-active { background: var(--cool); color: var(--paper); }
+  .sound-mode-btn.wordclue-active { background: var(--cool); color: var(--paper); }
 
   #controls-left {
     position: fixed; bottom: 16px; left: 16px;
@@ -179,7 +179,7 @@
   </div>
   <div id="right-stack">
     <button id="sound-btn" class="icon-btn" aria-label="Sound on" title="Sound">🔊</button>
-    <button id="phon-btn" class="sound-mode-btn" aria-label="Sound: Letter Names" title="Toggle: Letter Names / Phonics-ish">Aa</button>
+    <button id="phon-btn" class="sound-mode-btn" aria-label="Sound: Letter Names" title="Toggle: Letter Names / Word Clue">Aa</button>
     <button id="reset-btn" class="icon-btn" title="Reset">↺</button>
     <div class="badge" id="tall-badge"><span id="height">0</span><small>tall</small></div>
   </div>
@@ -208,80 +208,91 @@
     Y:'why', Z:'zee'
   };
 
-  // Phonics-ish approximations for browser TTS.
-  // NOTE: browser TTS phonics are inherently approximate — NOT true recorded phonemes.
-  // For accurate early-reading phonics, replace with recorded audio files (one mp3 per letter).
-  const PHONICS_MAP = {
-    // SATPIN core set
-    S:'sss', A:'ah', T:'t', P:'p', I:'ih', N:'nnn',
-    // Rest of A-Z — best-effort approximations only
-    B:'buh', C:'kuh', D:'duh', E:'eh',  F:'fff', G:'guh',
-    H:'huh', J:'juh', K:'kuh', L:'lll', M:'mmm', O:'oh',
-    Q:'kwuh', R:'rrr', U:'uh',  V:'vvv', W:'wuh', X:'ksss',
-    Y:'yuh', Z:'zzz'
+  // Word Clue anchor words — one familiar word per letter for a 4-year-old.
+  // Spoken as: letter name + ". " + word + "." (e.g. "ess. Sun.")
+  // NOTE: browser TTS is not reliable for isolated phonemes; this is an anchor-word mode, not true phonics.
+  // For true early-reading phonics, replace with recorded audio files (one mp3 per letter).
+  const WORD_CLUES = {
+    A:'Apple',  B:'Ball',    C:'Cat',     D:'Dog',   E:'Egg',
+    F:'Fish',   G:'Goat',    H:'Hat',     I:'Igloo', J:'Jam',
+    K:'Kite',   L:'Lion',    M:'Moon',    N:'Nose',  O:'Octopus',
+    P:'Pig',    Q:'Queen',   R:'Rabbit',  S:'Sun',   T:'Tiger',
+    U:'Umbrella', V:'Van',   W:'Water',   X:'Box',   Y:'Yellow',
+    Z:'Zebra'
   };
 
   // TTS voice settings — tune here if the voice sounds too fast or robotic
   const SPEAK_RATE  = 0.9;
   const SPEAK_PITCH = 1.15;
+  // Set to true to log voice selection and speech events to the browser console.
+  const DEBUG_SPEECH = false;
 
-  let preferredVoice = null;
-  function selectVoice() {
+  let selectedVoice = null;
+  function initVoices() {
     if (!('speechSynthesis' in window)) return;
-    const voices = speechSynthesis.getVoices();
-    if (!voices.length) return;
-    // Prefer clear, natural-sounding English voices in order
-    const prefs = [
-      'Samantha',                  // macOS / iOS US female
-      'Karen',                     // macOS AU female
-      'Google UK English Female',
-      'Microsoft Zira Desktop',    // Windows US female
-      'Microsoft Hazel Desktop',   // Windows UK female
-    ];
-    for (const name of prefs) {
-      const v = voices.find(v => v.name === name);
-      if (v) { preferredVoice = v; return; }
-    }
-    // Fallback: first en-US / en-GB / en-AU regional voice
-    const regional = voices.find(v => /^en-(US|GB|AU)/.test(v.lang));
-    if (regional) { preferredVoice = regional; return; }
-    // Last resort: any English voice
-    const anyEn = voices.find(v => v.lang.startsWith('en'));
-    if (anyEn) preferredVoice = anyEn;
+    const doSelect = () => {
+      const voices = speechSynthesis.getVoices();
+      if (DEBUG_SPEECH) console.log(`[speech] voiceschanged: ${voices.length} voices available`);
+      if (!voices.length) return;
+      const prefs = [
+        'Samantha', 'Karen', 'Google UK English Female',
+        'Microsoft Zira Desktop', 'Microsoft Hazel Desktop',
+      ];
+      let v = null;
+      for (const name of prefs) { v = voices.find(x => x.name === name); if (v) break; }
+      if (!v) v = voices.find(x => /^en-(US|GB|AU)/.test(x.lang)) || null;
+      if (!v) v = voices.find(x => x.lang.startsWith('en')) || null;
+      selectedVoice = v;
+      if (DEBUG_SPEECH) console.log(`[speech] selectedVoice: ${selectedVoice?.name} (${selectedVoice?.lang})`);
+    };
+    speechSynthesis.addEventListener('voiceschanged', doSelect);
+    doSelect(); // runs immediately in Safari; fires asynchronously in Chrome/Brave
   }
-  if ('speechSynthesis' in window) {
-    speechSynthesis.addEventListener('voiceschanged', selectVoice);
-    selectVoice(); // works immediately on some browsers
-  }
+  initVoices();
 
   let soundOn = true, audioUnlocked = false;
-  let soundMode = 'names'; // 'names' | 'phonics'
+  let soundMode = 'names'; // 'names' | 'wordclue'
+  // Warm up speech synthesis on first user gesture (some browsers require this).
   function unlockAudio() {
     if (audioUnlocked) return;
-    if ('speechSynthesis' in window) {
-      const u = new SpeechSynthesisUtterance(' '); u.volume = 0;
-      speechSynthesis.speak(u);
-    }
     audioUnlocked = true;
+    if (!('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0; u.rate = 10;
+    speechSynthesis.speak(u);
   }
   ['pointerdown','touchstart','keydown'].forEach(ev =>
     document.addEventListener(ev, unlockAudio, { once: true, passive: true })
   );
 
-  function speak(label) {
+  // Timestamp of last drop-triggered speak; guards against duplicate calls in the same event cycle.
+  let _lastDropMs = 0;
+
+  function speak(label, source) {
     if (!soundOn || !('speechSynthesis' in window)) return;
     let text;
     if (/[0-9]/.test(label)) {
       text = NUM[+label];
-    } else if (soundMode === 'phonics') {
-      text = PHONICS_MAP[label] || LETTER_NAMES[label] || label;
+    } else if (soundMode === 'wordclue') {
+      const letterName = LETTER_NAMES[label] || label;
+      const word = WORD_CLUES[label];
+      text = word ? `${letterName}. ${word}.` : letterName;
     } else {
       text = LETTER_NAMES[label] || label;
     }
+    if (DEBUG_SPEECH) {
+      console.log(`[speech] speak label="${label}" text="${text}" source=${source ?? 'unknown'} voice=${selectedVoice?.name ?? 'browser-default'}`);
+    }
+    // cancel() clears any queued utterances; resume() unpauses Chrome when it stalls.
     speechSynthesis.cancel();
+    if (typeof speechSynthesis.resume === 'function') speechSynthesis.resume();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = SPEAK_RATE; u.pitch = SPEAK_PITCH; u.volume = 1.0;
-    if (preferredVoice) u.voice = preferredVoice;
+    if (selectedVoice) u.voice = selectedVoice;
+    if (DEBUG_SPEECH) {
+      u.onend = () => console.log('[speech] onend');
+      u.onerror = (e) => console.error('[speech] onerror', e.error, e);
+    }
     speechSynthesis.speak(u);
   }
 
@@ -382,16 +393,24 @@
 
   function releaseBlock() {
     if (!pending) return;
+    // Capture and clear pending first — prevents any re-entry path from double-speaking.
+    const label = pending.label;
+    const color = pending.color;
+    pending = null;
+    cableRetracting = true;
     const blockY = CRANE_Y + cableLength + BLOCK/2;
     const body = Bodies.rectangle(craneX, blockY, BLOCK, BLOCK, {
       restitution: 0.05, friction: 0.95, frictionStatic: 1.2,
       density: 0.004, chamfer: { radius: 6 }, label: 'block',
     });
-    body.brick = { label: pending.label, color: pending.color };
+    body.brick = { label, color };
     Composite.add(world, body);
-    speak(pending.label);
-    pending = null;
-    cableRetracting = true;
+    // 200 ms guard: auto-release and button events can't both trigger speech in the same tick.
+    const now = Date.now();
+    if (now - _lastDropMs > 200) {
+      _lastDropMs = now;
+      speak(label, 'drop');
+    }
   }
 
   const keys = {};
@@ -436,7 +455,7 @@
         for (const b of blocks) {
           if (ux > b.bounds.min.x && ux < b.bounds.max.x &&
               uy > b.bounds.min.y && uy < b.bounds.max.y) {
-            speak(b.brick.label);
+            speak(b.brick.label, 'tap');
             break;
           }
         }
@@ -495,11 +514,11 @@
 
   const phonBtn = document.getElementById('phon-btn');
   phonBtn.addEventListener('click', () => {
-    soundMode = soundMode === 'names' ? 'phonics' : 'names';
-    const isPhonics = soundMode === 'phonics';
-    phonBtn.textContent = isPhonics ? 'Ph' : 'Aa';
-    phonBtn.classList.toggle('phonics-active', isPhonics);
-    phonBtn.setAttribute('aria-label', isPhonics ? 'Sound: Phonics-ish' : 'Sound: Letter Names');
+    soundMode = soundMode === 'names' ? 'wordclue' : 'names';
+    const isWordClue = soundMode === 'wordclue';
+    phonBtn.textContent = isWordClue ? 'Ww' : 'Aa';
+    phonBtn.classList.toggle('wordclue-active', isWordClue);
+    phonBtn.setAttribute('aria-label', isWordClue ? 'Sound: Word Clue' : 'Sound: Letter Names');
   });
 
   let score = 0;
