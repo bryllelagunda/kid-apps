@@ -81,6 +81,7 @@
   }
   .icon-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
   #sound-btn.muted { background: #ccc; opacity: .7; }
+  #claw-btn.active { background: var(--cool); color: var(--paper); }
   .icon-btn.glow {
     animation: pulseGlow 0.9s ease-in-out infinite;
     background: var(--hot); color: var(--paper);
@@ -168,6 +169,7 @@
   <div id="right-stack">
     <button id="sound-btn" class="icon-btn" aria-label="Sound on" title="Sound">🔊</button>
     <button id="reset-btn" class="icon-btn" title="Reset">↺</button>
+    <button id="claw-btn" class="icon-btn" title="Claw mode" aria-label="Claw mode off">🦾</button>
     <div class="badge" id="tall-badge"><span id="height">0</span><small>tall</small></div>
   </div>
 </div>
@@ -310,6 +312,10 @@
   };
 
   let pending = null;
+  let clawMode = false;
+  let clawCarrying = null;
+  let _clawReleaseMs = 0;
+  const CLAW_BLOCK_Y = 50; // block-center y-offset from cable end when carried
   let towerFull = false;
   let towerFullFrames = 0;
   function pickLabel() { const a = labels[mode]; return a[Math.floor(Math.random()*a.length)]; }
@@ -335,6 +341,7 @@
     return false;
   }
   function spawnPending() {
+    if (clawMode) return;
     cableLength = CABLE_MIN;
     if (spawnAreaBlocked()) {
       pending = null;
@@ -379,6 +386,35 @@
     if (now - _lastDropMs > 200) {
       _lastDropMs = now;
       speak(label, 'drop');
+    }
+  }
+
+  function releaseCarried() {
+    if (!clawCarrying) return;
+    const b = clawCarrying;
+    clawCarrying = null;
+    _clawReleaseMs = Date.now();
+    Body.setStatic(b, false);
+    Body.setVelocity(b, { x: 0, y: 0 });
+    Body.setAngularVelocity(b, 0);
+  }
+
+  function tryGrabBlock() {
+    if (clawCarrying) return;
+    if (Date.now() - _clawReleaseMs < 600) return;
+    const grabY = CRANE_Y + cableLength + CLAW_BLOCK_Y;
+    let nearest = null, nearestDist = 9999;
+    const blocks = Composite.allBodies(world).filter(b => b.label === 'block');
+    for (const b of blocks) {
+      const dx = Math.abs(b.position.x - craneX);
+      const dy = Math.abs(b.position.y - grabY);
+      if (dx > 55 || dy > 55) continue;
+      const d = Math.hypot(b.position.x - craneX, b.position.y - grabY);
+      if (d < nearestDist) { nearestDist = d; nearest = b; }
+    }
+    if (nearest) {
+      clawCarrying = nearest;
+      Body.setStatic(nearest, true);
     }
   }
 
@@ -453,13 +489,16 @@
   bindHold(document.getElementById('up-btn'),   v => upHeld = v);
   bindHold(document.getElementById('down-btn'), v => downHeld = v);
 
-  document.getElementById('drop-btn').addEventListener('click', () => releaseBlock());
+  document.getElementById('drop-btn').addEventListener('click', () => {
+    if (clawMode) { releaseCarried(); } else { releaseBlock(); }
+  });
   document.getElementById('reset-btn').addEventListener('click', () => {
+    clawCarrying = null; _clawReleaseMs = 0;
     const all = Composite.allBodies(world).filter(b => b.label === 'block');
     Composite.remove(world, all);
     pending = null; cableRetracting = false; cableLength = CABLE_MIN;
     towerFull = false; towerFullFrames = 0; updateTowerFullUI();
-    spawnPending();
+    if (!clawMode) spawnPending();
     score = 0; updateHud();
   });
 
@@ -481,6 +520,21 @@
     if (!soundOn && 'speechSynthesis' in window) speechSynthesis.cancel();
   });
 
+  const clawBtn = document.getElementById('claw-btn');
+  clawBtn.addEventListener('click', () => {
+    if (clawCarrying) releaseCarried();
+    clawMode = !clawMode;
+    clawBtn.classList.toggle('active', clawMode);
+    clawBtn.setAttribute('aria-label', clawMode ? 'Claw mode on' : 'Claw mode off');
+    if (clawMode) {
+      pending = null;
+      cableRetracting = false;
+    } else {
+      cableLength = CABLE_MIN;
+      spawnPending();
+    }
+  });
+
   let score = 0;
   function updateHud() {
     document.getElementById('score').textContent = score;
@@ -494,13 +548,14 @@
   Events.on(engine, 'afterUpdate', () => {
     const removed = [];
     for (const b of Composite.allBodies(world))
-      if (b.label === 'block' && (b.position.y > H + 200 || b.position.y < -300)) removed.push(b);
+      if (b.label === 'block' && b !== clawCarrying &&
+          (b.position.y > H + 200 || b.position.y < -300)) removed.push(b);
     if (removed.length) Composite.remove(world, removed);
   });
 
   const blockState = new WeakMap();
   function trackLandings() {
-    const blocks = Composite.allBodies(world).filter(b => b.label === 'block');
+    const blocks = Composite.allBodies(world).filter(b => b.label === 'block' && b !== clawCarrying);
     for (const b of blocks) {
       let st = blockState.get(b);
       if (!st) { st = { restFrames: 0, counted: false }; blockState.set(b, st); }
@@ -512,6 +567,22 @@
   }
 
   function updateCable() {
+    if (clawMode) {
+      const goingDown = keys['ArrowDown'] || downHeld;
+      const goingUp   = keys['ArrowUp']   || upHeld;
+      if (goingDown) cableLength += CABLE_SPEED_DOWN;
+      if (goingUp)   cableLength -= CABLE_SPEED_UP;
+      if (cableLength < CABLE_MIN) cableLength = CABLE_MIN;
+      const maxLen = groundTopY() - CRANE_Y - BLOCK - 10;
+      if (cableLength > maxLen) cableLength = maxLen;
+      if (clawCarrying) {
+        Body.setPosition(clawCarrying, { x: craneX, y: CRANE_Y + cableLength + CLAW_BLOCK_Y });
+        Body.setAngle(clawCarrying, 0);
+      } else {
+        tryGrabBlock();
+      }
+      return;
+    }
     if (cableRetracting) {
       cableLength -= CABLE_RETRACT_SPEED;
       if (cableLength <= CABLE_MIN) {
@@ -546,7 +617,7 @@
     updateCable();
     trackLandings();
     // If the tower was full, periodically retry spawning — maybe blocks shifted
-    if (towerFull && !cableRetracting) {
+    if (towerFull && !cableRetracting && !clawMode) {
       towerFullFrames++;
       if (towerFullFrames > 45) { towerFullFrames = 0; spawnPending(); }
     }
@@ -617,6 +688,54 @@
     ctx.restore();
   }
 
+  function drawClaw(x, y, closed) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    // Housing shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    roundRect(ctx, -13+2, 0+2, 26, 14, 4); ctx.fill();
+
+    // Housing block
+    ctx.fillStyle = '#3a3a3a';
+    roundRect(ctx, -13, 0, 26, 14, 4); ctx.fill();
+    // Highlight sheen
+    ctx.fillStyle = 'rgba(255,255,255,0.13)';
+    roundRect(ctx, -10, 2, 20, 5, 2); ctx.fill();
+    // Orange accent stripe
+    ctx.fillStyle = '#ff8a4c';
+    ctx.fillRect(-9, 7, 18, 3);
+    // Housing outline
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 2.5;
+    roundRect(ctx, -13, 0, 26, 14, 4); ctx.stroke();
+
+    const ang = closed ? 0.07 : 0.52;
+
+    // Left jaw — pivots left of centre
+    ctx.save();
+    ctx.translate(-4, 13);
+    ctx.rotate(-ang);
+    ctx.fillStyle = '#444';
+    roundRect(ctx, -9, 0, 10, 32, 5); ctx.fill();
+    ctx.beginPath(); ctx.arc(-4, 32, 5, 0, Math.PI); ctx.fill();
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2;
+    roundRect(ctx, -9, 0, 10, 32, 5); ctx.stroke();
+    ctx.restore();
+
+    // Right jaw — pivots right of centre
+    ctx.save();
+    ctx.translate(4, 13);
+    ctx.rotate(ang);
+    ctx.fillStyle = '#444';
+    roundRect(ctx, -1, 0, 10, 32, 5); ctx.fill();
+    ctx.beginPath(); ctx.arc(4, 32, 5, 0, Math.PI); ctx.fill();
+    ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 2;
+    roundRect(ctx, -1, 0, 10, 32, 5); ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+  }
+
   function drawClouds(t) {
     ctx.fillStyle = 'rgba(255,255,255,0.6)';
     const positions = [
@@ -682,7 +801,9 @@
 
     drawCrane();
 
-    if (pending) {
+    if (clawMode) {
+      drawClaw(craneX, CRANE_Y + cableLength, clawCarrying !== null);
+    } else if (pending) {
       const magY = CRANE_Y + cableLength;
       drawMagnet(craneX, magY);
       drawBlock(craneX, magY + 6 + BLOCK/2, 0, BLOCK, pending.color, pending.label);

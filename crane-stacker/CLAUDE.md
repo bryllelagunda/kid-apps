@@ -4,7 +4,7 @@
 
 A letter/number recognition crane stacking game for a 4-year-old. Built as a Progressive Web App so it installs to a tablet home screen and runs offline.
 
-- **Current version:** 3.7
+- **Current version:** 4.0
 - **Production URL:** https://apps.bryllelagunda.com/crane-stacker/
 - **Hosting:** Vercel (static, auto-deployed from GitHub `main` branch)
 - **Operator:** Parent. Communicates in plain English about design choices. Has not been editing code by hand — Claude Code is expected to perform end-to-end changes. Has a separate Claude chat session for strategic/design conversations; this codebase is for execution.
@@ -38,9 +38,18 @@ Rationale: vanilla JS + no build step keeps the source legible and the deploy tr
 - **Crane horizontal**: drag canvas, or arrow keys / A D.
 - **Cable vertical**: hold ↓ button (or ArrowDown) to lower at 3.2 px/frame; hold ↑ (or ArrowUp) to raise at 5.0 px/frame. Up is faster because "I panicked" must feel responsive.
 - **Auto-release on contact**: descending block detaches automatically when it touches the surface below. No second tap required. Reduces cognitive load for a 4yo.
-- **DROP button**: secondary chaos release. Drops from current cable height, no contact check. Kept for variety.
+- **DROP button**: secondary chaos release. Drops from current cable height, no contact check. Kept for variety. In Claw Mode, DROP releases the currently carried block.
 - **Tap a landed block**: speaks its label. For reinforcement.
 - **Tower-full handling**: when blocks reach the spawn point, new spawns are blocked, the reset button pulses red (`.glow` CSS class), and the game auto-retries every ~45 frames. Implemented in `spawnAreaBlocked()` and `spawnPending()`.
+- **Claw Mode** (v4.0): opt-in rearrangement mode toggled with the 🦾 button in the HUD right-stack. Normal drop gameplay is the default.
+  - When ON, the magnet hook is replaced with a two-jaw claw grapple drawn by `drawClaw(x, y, closed)`.
+  - No pending block is spawned while Claw Mode is active. `spawnPending()` returns early if `clawMode` is true.
+  - Lowering the claw near a landed block auto-grabs it (`tryGrabBlock()`): sets the body static and stores a reference in `clawCarrying`. Grab radius is 55 px on both axes from `CLAW_BLOCK_Y` offset below the cable end.
+  - While carrying, `Body.setPosition` and `Body.setAngle` reposition the block each frame so it follows the crane; the block is kept upright (angle 0).
+  - DROP or clicking 🦾 again calls `releaseCarried()`: sets body dynamic, zeroes velocity, starts a 600 ms re-grab cooldown (`_clawReleaseMs`).
+  - `trackLandings` and the off-screen cull both skip the carried block (`b !== clawCarrying`) to avoid counting it while held or culling it off-screen.
+  - Switching FROM Claw Mode: releases any carried block first, then calls `spawnPending()` to resume normal play.
+  - `CLAW_BLOCK_Y = 50` — block-centre y-offset from cable end when carried. Adjust only if claw visual/physics feel misaligned.
 
 ### Visual / audio
 - Blocks have **two visible LEGO studs** on top, in a darker shade of the block color. Matches the kid's physical LEGO interest. Drawn before the block body so the body covers their bases.
@@ -98,12 +107,13 @@ All paths in the project are relative (`./icon-192.png` etc.), so subpath hostin
 - **V3.5**: Replaced Phonics-ish mode (awkward browser TTS phonemes) with Word Clue mode — speaks letter name + anchor word (e.g. "ess. Sun."). Toggle label changed from "Ph" to "Ww". Full A-Z `WORD_CLUES` map with familiar 4-year-old words.
 - **V3.7**: Fixed letter A TTS — changed `LETTER_NAMES.A` from `'ay'` to `'A'`. Some TTS engines (especially NZ/AU voices) read the word "ay" as /aɪ/, identical to "eye" for I. The bare uppercase letter `'A'` triggers each engine's built-in letter-name pronunciation, which is reliably /eɪ/.
 - **V3.6**: Removed Ww / Word Clue mode entirely. Crane Stacker now uses only letter names and number names — no toggle, no secondary mode. Word-association and true phonics belong in a future separate app or a recorded-audio feature, not browser TTS inside Crane Stacker. Moved hosting from cPanel to Vercel.
+- **V4.0**: Added optional Claw Pickup mode (🦾 toggle in HUD). Normal crane-drop gameplay is unchanged and remains the default. Claw mode lets the child grab and rearrange already-landed blocks with a two-jaw grapple attachment. No new physics tuning — only existing `Body.setPosition`/`Body.setStatic` APIs used.
 
 ## Possible future features (queued, NOT committed — confirm with parent first)
 
 - **Word-building mode**: target picture (e.g., a cat) appears, hopper offers needed letters, kid stacks them to spell the word. Connects letter recognition to actual reading.
 - **Phonics / word-clue audio**: per-letter recorded mp3 files (not browser TTS). Would require hosted audio — keep offline bundle in mind.
-- **Magnet-pickup mode**: the hook can pick up *already-placed* blocks for rearrangement. Different cognitive skill — planning, undo. Major addition.
+- ~~**Magnet-pickup mode**~~ — shipped as **Claw Pickup mode** in v4.0.
 - **Sound effects**: thunk/ding/crash. Needs hosted audio files — would slightly complicate offline if not bundled.
 - **Save tower as PNG** via `canvas.toDataURL()` for sharing.
 - **Number-counting mode**: voice counts blocks as they're added.
