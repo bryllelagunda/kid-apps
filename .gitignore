@@ -16,3 +16,4 @@ venv/
 
 # Vercel local
 .vercel
+.gstack/

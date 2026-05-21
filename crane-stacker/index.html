@@ -107,6 +107,7 @@
   }
   .dir-btn.active, .dir-btn:active {
     transform: translateY(3px); box-shadow: 0 3px 0 var(--ink);
+    background: var(--hot); color: var(--paper);
   }
 
   #drop-btn {
@@ -123,12 +124,31 @@
   }
   #drop-btn:active { transform: translateY(3px); box-shadow: 0 3px 0 var(--ink); }
 
+  /* Home button — link styled identically to icon-btn */
+  a.icon-btn {
+    display: flex; align-items: center; justify-content: center;
+    text-decoration: none; pointer-events: auto;
+  }
+
+  /* Left column: home icon above score badge on desktop */
+  #left-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: auto; }
+  #home-btn { pointer-events: auto; }
+
   @media (max-width: 480px) {
-    .badge { font-size: 16px; padding: 5px 9px; }
-    .pill { font-size: 13px; padding: 5px 9px; }
+    .badge { font-size: 15px; padding: 4px 8px; }
+    /* Smaller pills so all 3 stay on one row and HUD height stays ~36px */
+    .pill { font-size: 11px; padding: 4px 7px; }
     .icon-btn { width: 36px; height: 36px; font-size: 16px; }
     .dir-btn { width: 64px; height: 64px; font-size: 30px; border-radius: 18px; }
     #drop-btn { font-size: 22px; padding: 18px 22px; min-width: 90px; }
+
+    /* Home + score side by side on narrow screens — keeps total HUD height ~36px */
+    #left-stack { flex-direction: row; align-items: center; gap: 4px; }
+    #home-btn { width: 28px; height: 28px; font-size: 14px; }
+
+    /* Right stack: icons in a row, tall badge tucked away */
+    #right-stack { flex-direction: row; align-items: center; gap: 4px; }
+    #tall-badge { display: none; }
   }
 </style>
 </head>
@@ -136,16 +156,19 @@
 <canvas id="game"></canvas>
 
 <div id="hud">
-  <div class="badge"><span id="score">0</span><small>stacked</small></div>
+  <div id="left-stack">
+    <a href="/" id="home-btn" class="icon-btn" aria-label="Back to app launcher">🏠</a>
+    <div class="badge"><span id="score">0</span><small>stacked</small></div>
+  </div>
   <div id="modes">
     <button class="pill active" data-mode="satpin">SATPIN</button>
     <button class="pill" data-mode="letters">A–Z</button>
     <button class="pill" data-mode="numbers">0–9</button>
   </div>
   <div id="right-stack">
-    <button id="sound-btn" class="icon-btn" title="Sound">🔊</button>
+    <button id="sound-btn" class="icon-btn" aria-label="Sound on" title="Sound">🔊</button>
     <button id="reset-btn" class="icon-btn" title="Reset">↺</button>
-    <div class="badge"><span id="height">0</span><small>tall</small></div>
+    <div class="badge" id="tall-badge"><span id="height">0</span><small>tall</small></div>
   </div>
 </div>
 
@@ -391,6 +414,7 @@
     soundOn = !soundOn;
     soundBtn.textContent = soundOn ? '🔊' : '🔇';
     soundBtn.classList.toggle('muted', !soundOn);
+    soundBtn.setAttribute('aria-label', soundOn ? 'Sound on' : 'Sound off');
     if (!soundOn && 'speechSynthesis' in window) speechSynthesis.cancel();
   });
 
