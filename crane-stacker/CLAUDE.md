@@ -4,7 +4,7 @@
 
 A letter/number recognition crane stacking game for a 4-year-old. Built as a Progressive Web App so it installs to a tablet home screen and runs offline.
 
-- **Current version:** 3.6
+- **Current version:** 3.7
 - **Production URL:** https://apps.bryllelagunda.com/crane-stacker/
 - **Hosting:** Vercel (static, auto-deployed from GitHub `main` branch)
 - **Operator:** Parent. Communicates in plain English about design choices. Has not been editing code by hand — Claude Code is expected to perform end-to-end changes. Has a separate Claude chat session for strategic/design conversations; this codebase is for execution.
@@ -96,6 +96,7 @@ All paths in the project are relative (`./icon-192.png` etc.), so subpath hostin
 - **V3.3**: Improved voice selection (prefers Samantha/Karen/Google UK English Female). Explicit LETTER_NAMES map for consistent TTS. Added Phonics-ish mode (experimental) with parent toggle "Aa/Ph" button in HUD.
 - **V3.4**: Fixed audio in Chrome/Brave — `speechSynthesis.resume()` added before every speak so Chrome doesn't silently stall. Refactored voice init into `initVoices()` with `DEBUG_SPEECH` flag. Per-drop speech guard (`_lastDropMs` + clearing `pending` before speaking) prevents duplicate speech from same release event. Unlock utterance now completes near-instantly (`rate=10`).
 - **V3.5**: Replaced Phonics-ish mode (awkward browser TTS phonemes) with Word Clue mode — speaks letter name + anchor word (e.g. "ess. Sun."). Toggle label changed from "Ph" to "Ww". Full A-Z `WORD_CLUES` map with familiar 4-year-old words.
+- **V3.7**: Fixed letter A TTS — changed `LETTER_NAMES.A` from `'ay'` to `'A'`. Some TTS engines (especially NZ/AU voices) read the word "ay" as /aɪ/, identical to "eye" for I. The bare uppercase letter `'A'` triggers each engine's built-in letter-name pronunciation, which is reliably /eɪ/.
 - **V3.6**: Removed Ww / Word Clue mode entirely. Crane Stacker now uses only letter names and number names — no toggle, no secondary mode. Word-association and true phonics belong in a future separate app or a recorded-audio feature, not browser TTS inside Crane Stacker. Moved hosting from cPanel to Vercel.
 
 ## Possible future features (queued, NOT committed — confirm with parent first)
