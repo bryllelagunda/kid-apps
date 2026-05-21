@@ -149,7 +149,8 @@
     /* Smaller pills so all 3 stay on one row and HUD height stays ~36px */
     .pill { font-size: 11px; padding: 4px 7px; }
     .icon-btn { width: 36px; height: 36px; font-size: 16px; }
-    .sound-mode-btn { font-size: 11px; padding: 4px 6px; }
+    /* Hide phonics toggle on narrow phones — HUD has no room. Primary device is tablet. */
+    #phon-btn { display: none; }
     .dir-btn { width: 64px; height: 64px; font-size: 30px; border-radius: 18px; }
     #drop-btn { font-size: 22px; padding: 18px 22px; min-width: 90px; }
 
