@@ -2,11 +2,11 @@
 
 ## Project overview
 
-A phonics/literacy crane stacking game for a 4-year-old. Built as a Progressive Web App so it installs to a tablet home screen and runs offline.
+A letter/number recognition crane stacking game for a 4-year-old. Built as a Progressive Web App so it installs to a tablet home screen and runs offline.
 
-- **Current version:** 3.5
-- **Production URL:** https://apps.bryllelagunda.com/cranewithkid/
-- **Hosting:** cPanel-based static hosting; deploys via File Manager upload; HTTPS via Let's Encrypt
+- **Current version:** 3.6
+- **Production URL:** https://apps.bryllelagunda.com/crane-stacker/
+- **Hosting:** Vercel (static, auto-deployed from GitHub `main` branch)
 - **Operator:** Parent. Communicates in plain English about design choices. Has not been editing code by hand — Claude Code is expected to perform end-to-end changes. Has a separate Claude chat session for strategic/design conversations; this codebase is for execution.
 
 ## Tech stack (do NOT change without explicit ask)
@@ -18,13 +18,13 @@ A phonics/literacy crane stacking game for a 4-year-old. Built as a Progressive 
 - PWA: `manifest.json` + `service-worker.js`.
 - Icons generated via `_make_icons.py` (Python + Pillow) at 192/512/maskable-512/favicon-32.
 
-Rationale: parent uploads via cPanel File Manager; any build complexity breaks that workflow. Vanilla JS keeps the source legible.
+Rationale: vanilla JS + no build step keeps the source legible and the deploy trivial (`git push`).
 
 ## Files
 
 | File | Role |
 |------|------|
-| `index.html` | The game. ~620 lines. All HTML, CSS, JS embedded. |
+| `index.html` | The game. All HTML, CSS, JS embedded. |
 | `manifest.json` | PWA metadata. |
 | `service-worker.js` | Caches app shell + CDN assets for offline. **Bump `CACHE_VERSION` on every deploy.** |
 | `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `favicon-32.png` | PWA + tab icons. |
@@ -46,12 +46,11 @@ Rationale: parent uploads via cPanel File Manager; any build complexity breaks t
 - Blocks have **two visible LEGO studs** on top, in a darker shade of the block color. Matches the kid's physical LEGO interest. Drawn before the block body so the body covers their bases.
 - Crane trolley: **hazard-striped (yellow + black)** with wheels and a clipped diagonal pattern.
 - Hook: **red-and-black electromagnet** bar with "N" and "S" labels. Visible on pending block and during cable retract.
-- **Two sound modes** selectable via a small "Aa / Ww" toggle in the HUD (parent-facing):
-  - **Letter Names** (default, "Aa" label): speaks the letter's name — "S" → "ess", "A" → "ay", "T" → "tee". Explicit `LETTER_NAMES` map ensures consistency across TTS engines.
-  - **Word Clue** ("Ww" label, blue highlight): speaks the letter name followed by an anchor word — S → "ess. Sun.", A → "ay. Apple.", T → "tee. Tiger." Full A-Z map in `WORD_CLUES`. Words chosen for familiarity with a 4-year-old. **This is an anchor-word mode, not true phonics.** Browser TTS is not reliable for isolated phonemes. For true early-reading phonics, the right solution is recorded audio files (one mp3 per letter).
-- **Numbers always speak their names** in both modes ("one", "two", etc.).
-- **Letter Names is the default** and the recommended mode. Word Clue mode reinforces letter-word association.
-- **Voice selection**: `selectVoice()` picks the best available English voice at startup (prefers Samantha / Karen / Google UK English Female / Microsoft Zira). Falls back to any `en-US/GB/AU` voice, then any English voice. Rate and pitch are in `SPEAK_RATE` / `SPEAK_PITCH` constants at the top of the script.
+- **Audio is letter-name only** (no toggle, no modes):
+  - Letters speak their name — S → "ess", A → "ay", T → "tee", P → "pee", I → "eye", N → "en", etc. Explicit `LETTER_NAMES` map covers A–Z for consistent TTS output across devices/browsers.
+  - Numbers speak their name — 0 → "zero", 1 → "one", etc. via `NUM` array.
+  - Word Clue / phonics modes were removed in v3.6 — browser TTS is not reliable for those use cases. If word-association or true phonics is ever added, the right solution is a separate app or recorded audio files (one mp3 per letter), not browser TTS.
+- **Voice selection**: `initVoices()` picks the best available English voice at startup (prefers Samantha / Karen / Google UK English Female / Microsoft Zira). Falls back to any `en-US/GB/AU` voice, then any English voice. Rate and pitch are in `SPEAK_RATE` / `SPEAK_PITCH` constants at the top of the script.
 - **Default mode is SATPIN** (the letters S A T P I N). Originally chosen for phonics density; kept because it's a useful 6-letter starter pool.
 - **No prose hints on the play screen**. The visible buttons are the documentation.
 
@@ -71,7 +70,7 @@ Reduces chaos-frustration without removing the topple-and-balance lesson.
 
 - Don't add a build tool, bundler, transpiler, or framework.
 - Don't add npm dependencies. Everything via CDN, cached by service worker.
-- Don't change the default sound mode away from Letter Names without explicit ask.
+- Don't add a second audio mode (no toggle, no wordclue, no phonics). Audio is letter names + number names only.
 - Don't add ads, analytics, or external network calls.
 - Don't make controls more complex — 4-year-old's game.
 - Don't auto-clear the kid's tower except via explicit reset.
@@ -81,13 +80,11 @@ Reduces chaos-frustration without removing the topple-and-balance lesson.
 
 ## Deployment
 
-1. **Bump `CACHE_VERSION`** in `service-worker.js` (e.g., `crane-stacker-v3.1` → `v3.2`). Without this, browsers serve stale cache.
-2. Upload all files to `public_html/apps.bryllelagunda.com/cranewithkid/` via cPanel File Manager.
-3. Confirm HTTPS is active on the subdomain (Let's Encrypt via cPanel).
-4. Visit the URL once while online so the service worker caches everything.
-5. Installed PWAs may need a force-quit to pick up the new service worker.
+Routine deploy: `git add <files> && git commit -m "..." && git push`. Vercel auto-deploys in ~30 seconds.
 
-All paths in the project are relative (`./icon-192.png` etc.), so subpath hosting works without code changes. Service worker scope defaults to its location (i.e., `/cranewithkid/`).
+**Always bump `CACHE_VERSION`** in `service-worker.js` (e.g., `crane-stacker-v3.6` → `v3.7`). Without this, browsers serve stale cache.
+
+All paths in the project are relative (`./icon-192.png` etc.), so subpath hosting works without code changes.
 
 ## Version history (key turning points)
 
@@ -99,11 +96,13 @@ All paths in the project are relative (`./icon-192.png` etc.), so subpath hostin
 - **V3.3**: Improved voice selection (prefers Samantha/Karen/Google UK English Female). Explicit LETTER_NAMES map for consistent TTS. Added Phonics-ish mode (experimental) with parent toggle "Aa/Ph" button in HUD.
 - **V3.4**: Fixed audio in Chrome/Brave — `speechSynthesis.resume()` added before every speak so Chrome doesn't silently stall. Refactored voice init into `initVoices()` with `DEBUG_SPEECH` flag. Per-drop speech guard (`_lastDropMs` + clearing `pending` before speaking) prevents duplicate speech from same release event. Unlock utterance now completes near-instantly (`rate=10`).
 - **V3.5**: Replaced Phonics-ish mode (awkward browser TTS phonemes) with Word Clue mode — speaks letter name + anchor word (e.g. "ess. Sun."). Toggle label changed from "Ph" to "Ww". Full A-Z `WORD_CLUES` map with familiar 4-year-old words.
+- **V3.6**: Removed Ww / Word Clue mode entirely. Crane Stacker now uses only letter names and number names — no toggle, no secondary mode. Word-association and true phonics belong in a future separate app or a recorded-audio feature, not browser TTS inside Crane Stacker. Moved hosting from cPanel to Vercel.
 
 ## Possible future features (queued, NOT committed — confirm with parent first)
 
-- **Magnet-pickup mode**: the hook can pick up *already-placed* blocks for rearrangement. Different cognitive skill — planning, undo. Major addition.
 - **Word-building mode**: target picture (e.g., a cat) appears, hopper offers needed letters, kid stacks them to spell the word. Connects letter recognition to actual reading.
+- **Phonics / word-clue audio**: per-letter recorded mp3 files (not browser TTS). Would require hosted audio — keep offline bundle in mind.
+- **Magnet-pickup mode**: the hook can pick up *already-placed* blocks for rearrangement. Different cognitive skill — planning, undo. Major addition.
 - **Sound effects**: thunk/ding/crash. Needs hosted audio files — would slightly complicate offline if not bundled.
 - **Save tower as PNG** via `canvas.toDataURL()` for sharing.
 - **Number-counting mode**: voice counts blocks as they're added.
