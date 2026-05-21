@@ -2,7 +2,7 @@
 // Carefully scoped: does NOT cache or intercept requests for sub-apps —
 // each app subdirectory has its own service worker with its own scope.
 
-const CACHE_VERSION = 'kid-apps-launcher-v1.0';
+const CACHE_VERSION = 'kid-apps-launcher-v2.0';
 
 const OWN_ASSETS = [
   './',
