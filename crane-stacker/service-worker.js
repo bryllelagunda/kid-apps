@@ -1,7 +1,7 @@
 // Service worker for Crane Stacker
 // Caches app shell + external dependencies for offline use.
 
-const CACHE_VERSION = 'crane-stacker-v4.0';
+const CACHE_VERSION = 'crane-stacker-v4.1';
 const CORE_ASSETS = [
   './',
   './index.html',

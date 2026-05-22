@@ -135,6 +135,59 @@
   #left-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: auto; }
   #home-btn { pointer-events: auto; }
 
+  /* Settings panel */
+  #set-panel {
+    display: none;
+    position: fixed;
+    top: calc(60px + env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 20;
+    background: var(--paper);
+    border: 4px solid var(--ink);
+    border-radius: 18px;
+    box-shadow: 0 6px 0 var(--ink);
+    padding: 14px 18px;
+    min-width: 260px;
+    max-width: 90vw;
+    font-family: 'Fredoka', sans-serif;
+  }
+  #set-panel.open { display: block; }
+  #set-title {
+    font-family: 'Lilita One', sans-serif;
+    font-size: 18px; color: var(--ink);
+    margin-bottom: 10px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #set-input {
+    width: 100%; padding: 8px 10px; font-size: 18px;
+    font-family: 'Fredoka', sans-serif; font-weight: 700;
+    border: 3px solid var(--ink); border-radius: 10px;
+    background: #fff; color: var(--ink);
+    letter-spacing: 3px; text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  #set-input:focus { outline: none; border-color: var(--cool); }
+  #set-preview { font-size: 13px; color: #777; margin-bottom: 10px; min-height: 16px; }
+  .set-btns { display: flex; gap: 8px; }
+  .set-btn {
+    flex: 1; font-family: 'Lilita One', sans-serif;
+    font-size: 15px; padding: 8px 10px;
+    border-radius: 12px; border: 3px solid var(--ink);
+    cursor: pointer; box-shadow: 0 3px 0 var(--ink);
+  }
+  .set-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+  #set-apply-btn { background: var(--hot); color: var(--paper); }
+  #set-reset-btn { background: var(--paper); color: var(--ink); }
+  #set-close-btn {
+    font-family: 'Lilita One', sans-serif; font-size: 18px;
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 2px solid var(--ink); background: transparent;
+    cursor: pointer; line-height: 1;
+  }
+  /* DROP/GRAB button state */
+  #drop-btn.grab { background: var(--cool); }
+
   @media (max-width: 480px) {
     .badge { font-size: 15px; padding: 4px 8px; }
     /* Smaller pills so all 3 stay on one row and HUD height stays ~36px */
@@ -165,6 +218,7 @@
     <button class="pill active" data-mode="satpin">SATPIN</button>
     <button class="pill" data-mode="letters">A–Z</button>
     <button class="pill" data-mode="numbers">0–9</button>
+    <button id="edit-set-btn" class="pill" title="Edit custom set" aria-label="Edit custom set" style="font-size:17px;padding:4px 9px;opacity:0.72">⚙</button>
   </div>
   <div id="right-stack">
     <button id="sound-btn" class="icon-btn" aria-label="Sound on" title="Sound">🔊</button>
@@ -180,6 +234,21 @@
 </div>
 
 <button id="drop-btn">DROP</button>
+
+<div id="set-panel" role="dialog" aria-label="Custom block set editor">
+  <div id="set-title">
+    <span>Custom set</span>
+    <button id="set-close-btn" title="Close" aria-label="Close">×</button>
+  </div>
+  <input id="set-input" type="text" placeholder="e.g. satpin or abc123"
+         maxlength="72" autocomplete="off" autocorrect="off"
+         autocapitalize="characters" spellcheck="false">
+  <div id="set-preview"></div>
+  <div class="set-btns">
+    <button id="set-apply-btn" class="set-btn">Apply</button>
+    <button id="set-reset-btn" class="set-btn">Reset SATPIN</button>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
 <script>
@@ -305,8 +374,24 @@
   let cableRetracting = false;
   let mode = 'satpin';
 
+  const SATPIN_DEFAULT = ['S','A','T','P','I','N'];
+  function loadCustomSet() {
+    try {
+      const saved = localStorage.getItem('craneStackerCustomSet');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length >= 1) return parsed;
+      }
+    } catch(e) {}
+    return [...SATPIN_DEFAULT];
+  }
+  function saveCustomSet(set) {
+    try { localStorage.setItem('craneStackerCustomSet', JSON.stringify(set)); } catch(e) {}
+  }
+  let customSet = loadCustomSet();
+
   const labels = {
-    satpin:  ['S','A','T','P','I','N'],
+    get satpin() { return customSet; },
     letters: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''),
     numbers: '0123456789'.split(''),
   };
@@ -397,6 +482,7 @@
     Body.setStatic(b, false);
     Body.setVelocity(b, { x: 0, y: 0 });
     Body.setAngularVelocity(b, 0);
+    updateDropBtn();
   }
 
   function tryGrabBlock() {
@@ -406,6 +492,8 @@
     let nearest = null, nearestDist = 9999;
     const blocks = Composite.allBodies(world).filter(b => b.label === 'block');
     for (const b of blocks) {
+      if (b.isStatic) continue; // skip already-static bodies
+      if (b.position.y < -200 || b.position.y > H + 50) continue; // off-screen
       const dx = Math.abs(b.position.x - craneX);
       const dy = Math.abs(b.position.y - grabY);
       if (dx > 55 || dy > 55) continue;
@@ -415,6 +503,7 @@
     if (nearest) {
       clawCarrying = nearest;
       Body.setStatic(nearest, true);
+      updateDropBtn();
     }
   }
 
@@ -490,7 +579,11 @@
   bindHold(document.getElementById('down-btn'), v => downHeld = v);
 
   document.getElementById('drop-btn').addEventListener('click', () => {
-    if (clawMode) { releaseCarried(); } else { releaseBlock(); }
+    if (clawMode) {
+      if (clawCarrying) { releaseCarried(); } else { tryGrabBlock(); }
+    } else {
+      releaseBlock();
+    }
   });
   document.getElementById('reset-btn').addEventListener('click', () => {
     clawCarrying = null; _clawReleaseMs = 0;
@@ -500,11 +593,13 @@
     towerFull = false; towerFullFrames = 0; updateTowerFullUI();
     if (!clawMode) spawnPending();
     score = 0; updateHud();
+    updateDropBtn();
   });
 
-  document.querySelectorAll('.pill').forEach(p => {
+  // Only select pills that have data-mode; ⚙ button shares .pill styling but has no mode.
+  document.querySelectorAll('.pill[data-mode]').forEach(p => {
     p.addEventListener('click', () => {
-      document.querySelectorAll('.pill').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.pill[data-mode]').forEach(x => x.classList.remove('active'));
       p.classList.add('active');
       mode = p.dataset.mode;
       if (pending) spawnPending();
@@ -533,6 +628,7 @@
       cableLength = CABLE_MIN;
       spawnPending();
     }
+    updateDropBtn();
   });
 
   let score = 0;
@@ -544,6 +640,89 @@
     for (const b of blocks) if (b.position.y < highest) highest = b.position.y;
     document.getElementById('height').textContent = Math.max(0, Math.round((gY - highest) / BLOCK));
   }
+
+  function updateDropBtn() {
+    const btn = document.getElementById('drop-btn');
+    if (!btn) return;
+    if (clawMode && !clawCarrying) {
+      btn.textContent = 'GRAB';
+      btn.classList.add('grab');
+    } else {
+      btn.textContent = 'DROP';
+      btn.classList.remove('grab');
+    }
+  }
+
+  function updateSatpinPillLabel() {
+    const pill = document.querySelector('[data-mode="satpin"]');
+    if (!pill) return;
+    const isDefault = customSet.length === SATPIN_DEFAULT.length &&
+      customSet.every((c, i) => c === SATPIN_DEFAULT[i]);
+    pill.textContent = isDefault ? 'SATPIN' : 'CUSTOM';
+  }
+
+  function parseCustomSet(input) {
+    const seen = new Set();
+    const result = [];
+    for (const ch of input.toUpperCase()) {
+      if (/[A-Z0-9]/.test(ch) && !seen.has(ch)) { seen.add(ch); result.push(ch); }
+    }
+    return result.length >= 1 ? result : null;
+  }
+
+  function applyCustomSet(newSet) {
+    customSet = newSet;
+    saveCustomSet(customSet);
+    updateSatpinPillLabel();
+    if (mode === 'satpin' && pending && !customSet.includes(pending.label)) {
+      pending = null;
+      spawnPending();
+    }
+  }
+
+  // Settings panel
+  const editSetBtn = document.getElementById('edit-set-btn');
+  const setPanel   = document.getElementById('set-panel');
+  const setInput   = document.getElementById('set-input');
+  const setPreview = document.getElementById('set-preview');
+
+  function refreshSetPreview(input) {
+    const parsed = parseCustomSet(input);
+    setPreview.textContent = parsed
+      ? 'Set: ' + parsed.join(' ')
+      : 'Need at least 1 valid letter or number';
+  }
+
+  editSetBtn.addEventListener('click', () => {
+    setInput.value = customSet.join('');
+    refreshSetPreview(customSet.join(''));
+    setPanel.classList.toggle('open');
+  });
+  document.getElementById('set-close-btn').addEventListener('click', () => {
+    setPanel.classList.remove('open');
+  });
+  setInput.addEventListener('input', () => {
+    const pos = setInput.selectionStart;
+    setInput.value = setInput.value.toUpperCase();
+    setInput.setSelectionRange(pos, pos);
+    refreshSetPreview(setInput.value);
+  });
+  document.getElementById('set-apply-btn').addEventListener('click', () => {
+    const parsed = parseCustomSet(setInput.value);
+    if (!parsed) return;
+    applyCustomSet(parsed);
+    setPanel.classList.remove('open');
+  });
+  document.getElementById('set-reset-btn').addEventListener('click', () => {
+    applyCustomSet([...SATPIN_DEFAULT]);
+    setInput.value = SATPIN_DEFAULT.join('');
+    refreshSetPreview(SATPIN_DEFAULT.join(''));
+    setPanel.classList.remove('open');
+  });
+
+  // Initialize UI state
+  updateDropBtn();
+  updateSatpinPillLabel();
 
   Events.on(engine, 'afterUpdate', () => {
     const removed = [];
@@ -792,6 +971,32 @@
     ctx.restore();
   }
 
+  function drawGrabHighlight() {
+    if (!clawMode || clawCarrying) return;
+    if (Date.now() - _clawReleaseMs < 600) return;
+    const grabY = CRANE_Y + cableLength + CLAW_BLOCK_Y;
+    let nearest = null, nearestDist = 9999;
+    for (const b of Composite.allBodies(world).filter(b => b.label === 'block')) {
+      if (b.isStatic) continue;
+      if (b.position.y < -200 || b.position.y > H + 50) continue;
+      const dx = Math.abs(b.position.x - craneX);
+      const dy = Math.abs(b.position.y - grabY);
+      if (dx > 55 || dy > 55) continue;
+      const d = Math.hypot(b.position.x - craneX, b.position.y - grabY);
+      if (d < nearestDist) { nearestDist = d; nearest = b; }
+    }
+    if (!nearest) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(46,184,255,0.8)';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([7, 5]);
+    const s = BLOCK + 10;
+    roundRect(ctx, nearest.position.x - s/2, nearest.position.y - s/2, s, s, 10);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
   function draw() {
     ctx.clearRect(0, 0, W, H);
     drawClouds(performance.now());
@@ -799,6 +1004,7 @@
     for (const b of Composite.allBodies(world).filter(b => b.label === 'block'))
       drawBlock(b.position.x, b.position.y, b.angle, BLOCK, b.brick.color, b.brick.label);
 
+    drawGrabHighlight();
     drawCrane();
 
     if (clawMode) {

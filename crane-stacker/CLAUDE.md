@@ -4,7 +4,7 @@
 
 A letter/number recognition crane stacking game for a 4-year-old. Built as a Progressive Web App so it installs to a tablet home screen and runs offline.
 
-- **Current version:** 4.0
+- **Current version:** 4.1
 - **Production URL:** https://apps.bryllelagunda.com/crane-stacker/
 - **Hosting:** Vercel (static, auto-deployed from GitHub `main` branch)
 - **Operator:** Parent. Communicates in plain English about design choices. Has not been editing code by hand — Claude Code is expected to perform end-to-end changes. Has a separate Claude chat session for strategic/design conversations; this codebase is for execution.
@@ -50,6 +50,8 @@ Rationale: vanilla JS + no build step keeps the source legible and the deploy tr
   - `trackLandings` and the off-screen cull both skip the carried block (`b !== clawCarrying`) to avoid counting it while held or culling it off-screen.
   - Switching FROM Claw Mode: releases any carried block first, then calls `spawnPending()` to resume normal play.
   - `CLAW_BLOCK_Y = 50` — block-centre y-offset from cable end when carried. Adjust only if claw visual/physics feel misaligned.
+  - **Context-aware DROP/GRAB button** (v4.1): when Claw Mode is ON and claw is empty, the DROP button label changes to "GRAB" (blue) and pressing it calls `tryGrabBlock()`. When carrying a block it shows "DROP" and releases. Off-screen blocks and already-static bodies are excluded from grab candidates.
+  - **Grab highlight** (v4.1): a dashed blue ring is drawn around the nearest grabbable block when the claw is within range (55 px on both axes from the grab point). Cleared during the 600 ms post-release cooldown.
 
 ### Visual / audio
 - Blocks have **two visible LEGO studs** on top, in a darker shade of the block color. Matches the kid's physical LEGO interest. Drawn before the block body so the body covers their bases.
@@ -62,6 +64,8 @@ Rationale: vanilla JS + no build step keeps the source legible and the deploy tr
 - **Voice selection**: `initVoices()` picks the best available English voice at startup (prefers Samantha / Karen / Google UK English Female / Microsoft Zira). Falls back to any `en-US/GB/AU` voice, then any English voice. Rate and pitch are in `SPEAK_RATE` / `SPEAK_PITCH` constants at the top of the script.
 - **Default mode is SATPIN** (the letters S A T P I N). Originally chosen for phonics density; kept because it's a useful 6-letter starter pool.
 - **No prose hints on the play screen**. The visible buttons are the documentation.
+- **Custom block set** (v4.1): the SATPIN mode pool is parent-editable. A small ⚙ button beside the mode pills opens a compact settings panel (non-modal). The parent types any letters A–Z and/or digits 0–9; invalid characters are stripped, duplicates removed, lowercase uppercased. Minimum 1 character, maximum 36. The pill label changes from "SATPIN" to "CUSTOM" when the set differs from the default. A "Reset SATPIN" button restores the default. If the current pending block's label is no longer in the new set, a fresh block is spawned. A–Z and 0–9 modes are unaffected by the custom set.
+  - `localStorage` key: `craneStackerCustomSet` — stores a JSON array of characters, e.g. `["A","B","C"]`. This is the **only** use of localStorage in this app. Block/tower positions are NOT persisted and remain session-only.
 
 ### Physics tuning
 ```
@@ -83,7 +87,7 @@ Reduces chaos-frustration without removing the topple-and-balance lesson.
 - Don't add ads, analytics, or external network calls.
 - Don't make controls more complex — 4-year-old's game.
 - Don't auto-clear the kid's tower except via explicit reset.
-- Don't use localStorage for game state. Blocks are session-only and that's intentional.
+- Don't use localStorage for game state. Blocks are session-only and that's intentional. **Exception (v4.1)**: `localStorage` is used for the parent's custom block set preference only (`craneStackerCustomSet`). Block and tower positions are never persisted.
 - Don't introduce modal dialogs that block play.
 - Don't change tunings (gravity, friction, cable speeds, block size) without ask — they were arrived at through testing.
 
@@ -108,6 +112,7 @@ All paths in the project are relative (`./icon-192.png` etc.), so subpath hostin
 - **V3.7**: Fixed letter A TTS — changed `LETTER_NAMES.A` from `'ay'` to `'A'`. Some TTS engines (especially NZ/AU voices) read the word "ay" as /aɪ/, identical to "eye" for I. The bare uppercase letter `'A'` triggers each engine's built-in letter-name pronunciation, which is reliably /eɪ/.
 - **V3.6**: Removed Ww / Word Clue mode entirely. Crane Stacker now uses only letter names and number names — no toggle, no secondary mode. Word-association and true phonics belong in a future separate app or a recorded-audio feature, not browser TTS inside Crane Stacker. Moved hosting from cPanel to Vercel.
 - **V4.0**: Added optional Claw Pickup mode (🦾 toggle in HUD). Normal crane-drop gameplay is unchanged and remains the default. Claw mode lets the child grab and rearrange already-landed blocks with a two-jaw grapple attachment. No new physics tuning — only existing `Body.setPosition`/`Body.setStatic` APIs used.
+- **V4.1**: Improved Claw Mode UX — DROP button becomes "GRAB" (blue) when claw is empty; pressing GRAB attempts a manual grab of the nearest eligible block. Grab highlight (dashed blue ring) shows the nearest grabbable block when in range. Added parent-editable custom block set: ⚙ button near mode pills opens a compact panel; set is persisted to localStorage. SATPIN pill relabels to "CUSTOM" when the set differs from default. A–Z and 0–9 modes unchanged.
 
 ## Possible future features (queued, NOT committed — confirm with parent first)
 
