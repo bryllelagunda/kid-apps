@@ -1,0 +1,33 @@
+{
+  "name": "Printables — Worksheet Maker",
+  "short_name": "Printables",
+  "description": "Build printable practice sheets — name tracing, letters, counting, shapes, strokes, mazes and cutting lines — then print the day's pack as one PDF.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#f6f3ec",
+  "theme_color": "#ff7a45",
+  "categories": ["education", "kids", "productivity"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
