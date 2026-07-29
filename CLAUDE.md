@@ -33,14 +33,24 @@ A growing collection of educational web games for a 4-year-old child. Hosted at 
 ├── service-worker.js                  ← launcher SW (scoped to root; ignores sub-apps)
 ├── icon-*.png, favicon-32.png         ← launcher icons
 ├── _make_icons.py                     ← regenerates launcher icons
-└── crane-stacker/                     ← apps.bryllelagunda.com/crane-stacker/
-    ├── CLAUDE.md                      ← app-specific context (read this when editing the crane game)
+├── crane-stacker/                     ← apps.bryllelagunda.com/crane-stacker/
+│   ├── CLAUDE.md                      ← app-specific context (read this when editing the crane game)
+│   ├── README.md
+│   ├── index.html
+│   ├── manifest.json
+│   ├── service-worker.js
+│   └── icon-*.png, _make_icons.py
+└── printables/                        ← apps.bryllelagunda.com/printables/
+    ├── CLAUDE.md                      ← app-specific context (read before editing the worksheet maker)
     ├── README.md
-    ├── index.html
+    ├── index.html                     ← everything: HTML, CSS, JS, embedded font
     ├── manifest.json
     ├── service-worker.js
     └── icon-*.png, _make_icons.py
 ```
+
+Not every app is a *game*. `printables/` is a parent-facing tool that produces paper for
+the kid; the launcher tiles it alongside the games, but its UI is meant for an adult.
 
 ## Conventions for any new app added to this workspace
 

@@ -7,12 +7,14 @@ A small launcher and a growing collection of educational web games for kids. Hos
 | Slug | URL | Status |
 |------|-----|--------|
 | `crane-stacker` | `/crane-stacker/` | v3.1, shipped |
+| `printables` | `/printables/` | v1.0, shipped |
 | _(more to come)_ | | |
 
 ## What's in here
 
 - `index.html` — the **launcher** (tile grid). Visit the root URL and you land here.
 - `crane-stacker/` — first game. Phonics-flavored crane block-stacker for ages 4–6.
+- `printables/` — worksheet maker. A parent tool: build practice sheets, print the pack as one PDF.
 - `CLAUDE.md` — workspace-level conventions for AI coders working in this repo.
 - `vercel.json` — Vercel routing & cache headers (esp. for service workers).
 
