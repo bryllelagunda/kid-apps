@@ -38,9 +38,14 @@ name/date header and "I did it!" reward stars.
 - **Printing** is `window.print()` against a `@page` rule rewritten at print time by
   `setPageRule()`. `@media print` hides the sidebar. Print-to-PDF in the browser dialog
   is the intended "save" path.
-- **The pack** (`const pack = []`) is an in-memory array of frozen config snapshots.
-  It is **not persisted** — a reload loses it. Acceptable: a pack is one sitting's worth
-  of sheets, built and printed in a few minutes.
+- **The pack** (`const pack = []`) is an array of frozen config snapshots, persisted to
+  `localStorage` under `printables.v1` alongside the child's name.
+- **Persistence is name + pack only.** Mode and the per-mode controls are deliberately
+  not saved: the parent picks a fresh activity each sitting, and restoring a half-built
+  sheet is more confusing than helpful. `saveState()` is called from `drawPack()` (the
+  single funnel every pack mutation goes through) and from the `kidName` input listener.
+  `loadState()` drops any entry whose `mode` isn't in `BUILDERS` — an unknown mode would
+  throw in `buildPage()` and blank the preview.
 
 ## Key functions
 
@@ -69,6 +74,8 @@ name/date header and "I did it!" reward stars.
 
 ## Known gaps (deliberate, not bugs)
 
-- The child's name defaults to a hardcoded value and isn't persisted across reloads.
-- The pack is lost on reload.
 - A pack that mixes portrait and landscape prints as one orientation with a warning.
+- The pack now survives reloads, so "Clear the pack" is the only way to empty it —
+  closing the tab no longer does. That button is the reason it exists.
+- Nothing here has been print-tested on paper yet; the print path has only been checked
+  through the browser's print preview.

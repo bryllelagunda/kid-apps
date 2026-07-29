@@ -66,6 +66,8 @@
   .packitem button{border:0;background:transparent;color:var(--muted);font-size:15px;cursor:pointer;}
   .packprint{width:100%;margin-top:4px;border:0;background:var(--go);color:#fff;font-weight:800;
     font-size:14px;padding:12px;border-radius:11px;cursor:pointer;}
+  .packclear{width:100%;margin-top:6px;border:0;background:transparent;color:var(--muted);
+    font-size:11.5px;padding:4px;cursor:pointer;}
   .note{font-size:10.5px;color:var(--muted);margin-top:9px;text-align:center;}
   .warn{font-size:11px;color:#b3541e;background:#fff1e8;border:1px solid #ffd6c0;
     border-radius:8px;padding:7px 9px;margin-top:8px;display:none;}
@@ -202,6 +204,7 @@
     <h4>Today&rsquo;s pack &mdash; <span id="packCount">0</span> pages</h4>
     <div id="packList"></div>
     <button class="packprint" onclick="printPack()">Print the whole pack</button>
+    <button class="packclear" onclick="clearPack()">Clear the pack</button>
     <div class="note">Print dialog &rarr; Save as PDF. Margins: None.</div>
   </div>
 </aside>
@@ -579,6 +582,24 @@ function cfgCurrent(){
     size:+document.getElementById("zSize").value,seed:mazeSeed,
     label:"Maze ("+document.getElementById("zShape").value+")"});}
 
+/* ---------- persistence ---------- */
+/* Name and pack survive a reload. Everything else (mode, per-mode controls) is
+   deliberately not saved — the parent picks a fresh activity each sitting. */
+const STORE_KEY="printables.v1";
+function saveState(){
+  try{localStorage.setItem(STORE_KEY,JSON.stringify(
+    {name:document.getElementById("kidName").value,pack:pack}));}
+  catch(e){/* private mode or quota: the app works, it just won't remember */}}
+function loadState(){
+  let s=null;
+  try{s=JSON.parse(localStorage.getItem(STORE_KEY)||"null");}catch(e){return;}
+  if(!s||typeof s!=="object")return;
+  if(typeof s.name==="string"&&s.name.trim())document.getElementById("kidName").value=s.name;
+  /* Drop anything that wouldn't render — an old or hand-edited entry with an
+     unknown mode would throw in buildPage() and blank the preview. */
+  if(Array.isArray(s.pack))s.pack.filter(p=>p&&BUILDERS[p.mode]&&typeof p.label==="string")
+    .forEach(p=>pack.push(p));}
+
 /* ---------- pack ---------- */
 const pack=[];
 function addToPack(){pack.push(JSON.parse(JSON.stringify(cfgCurrent())));drawPack();}
@@ -586,7 +607,10 @@ function removePack(i){pack.splice(i,1);drawPack();}
 function drawPack(){document.getElementById("packCount").textContent=pack.length;
   document.getElementById("packList").innerHTML=pack.map((p,i)=>
     '<div class="packitem"><b>'+(i+1)+'</b><span>'+esc(p.label)+'</span>'
-    +'<button onclick="removePack('+i+')">&#10005;</button></div>').join("");}
+    +'<button onclick="removePack('+i+')">&#10005;</button></div>').join("");
+  saveState();}
+function clearPack(){if(pack.length&&!confirm("Clear all "+pack.length+" sheets from today's pack?"))return;
+  pack.length=0;drawPack();}
 function rndPick(a){return a[Math.floor(Math.random()*a.length)];}
 function surprise(){pack.push(randomSheet());drawPack();}
 function randomSheet(){
@@ -659,6 +683,7 @@ document.getElementById("mode").addEventListener("change",setModeUI);
 ["kidName","age","orient","gName","gReward","tTitle","tWords","tRows","tStyle","tBlank",
  "lLower","lBlank","nFrom","nTo","nLayout","nIcon","sCap","zShape","zSize"]
  .forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener("input",render);});
+document.getElementById("kidName").addEventListener("input",saveState);
 function render(){const c=cfgCurrent();
   document.getElementById("pages").innerHTML=buildPage(c);
   const w=document.getElementById("tWarn");
@@ -667,6 +692,8 @@ function render(){const c=cfgCurrent();
     else if(c._fit.shrunk){w.style.display="";w.textContent="Letters shrunk to fit the width. A4 landscape gives bigger letters.";}
     else w.style.display="none";
   }else if(w)w.style.display="none";}
+loadState();
+drawPack();
 setModeUI();
 
 if('serviceWorker' in navigator){

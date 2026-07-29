@@ -3,7 +3,7 @@
 // the Poppins subset is embedded in index.html as a base64 @font-face — so
 // there is nothing external to cache and the app works fully offline.
 
-const CACHE_VERSION = 'printables-v1.0';
+const CACHE_VERSION = 'printables-v1.1';
 const CORE_ASSETS = [
   './',
   './index.html',
