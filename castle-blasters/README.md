@@ -53,7 +53,7 @@ python3 -m http.server 8000     # from the repo root
 open http://localhost:8000/castle-blasters/
 ```
 
-- `?selftest=1` — runs 60 assertions and prints pass/fail on screen. Does not
+- `?selftest=1` — runs 61 assertions and prints pass/fail on screen. Does not
   start the match; reload without it to play.
 - `?perf=1` — 40-block stress castle plus a frame-time and tunnelling overlay.
 - `?perf=1&slots=hccc` — the same overlay over a real 4-player match.

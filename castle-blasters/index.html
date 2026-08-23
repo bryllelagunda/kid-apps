@@ -4008,6 +4008,29 @@ function runSelftest() {
     return 'last standing first; points only among the living; ties to the lower id';
   });
 
+  T('players', 'a mutual elimination still ends the match and still names a winner', () => {
+    /* One shot can take the last two players out together — a self-hit that
+       also topples the opponent. alive.length is then 0, not 1, and both the
+       guard and the winner lookup have to survive it: an empty `alive` list
+       must not fall through to ROUND_COMPLETE, and winner() must not return
+       null and leave FINAL_RESULTS showing a blank badge. */
+    players.reset(['human', 'cpu']);
+    players.list[0].score = 300; players.list[0].alive = false;
+    players.list[1].score = 120; players.list[1].alive = false;
+
+    ok(players.living().length === 0, 'setup: nobody left alive');
+    ok(turnRules.nextState({ aliveCount: 0, livingHumans: 0, nextKind: 'cpu' }) === STATES.FINAL_RESULTS,
+       'an empty board must end the match, not roll the round over');
+    const w = players.winner();
+    ok(w !== null, 'winner() returned null — FINAL_RESULTS would draw a blank badge');
+    ok(w.id === 1, 'with nobody standing, the highest score takes it, got player ' + w.id);
+
+    // ...and an exact tie among the dead still resolves, to the lower id.
+    players.list[1].score = 300;
+    ok(players.winner().id === 1, 'a tie among the eliminated must still resolve');
+    return 'alive=0 -> FINAL_RESULTS, winner falls back to top score, ties to lower id';
+  });
+
   T('players', 'Play Again resets hearts, scores and stats but keeps the slots', () => {
     players.reset(['human', 'cpu', 'cpu']);
     players.list[0].score = 500; players.list[0].hearts = 0; players.list[0].alive = false;

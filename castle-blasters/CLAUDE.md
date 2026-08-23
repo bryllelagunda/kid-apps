@@ -35,7 +35,7 @@ The match. Built:
   animation — drawn from the recorded silhouette, because the body is already
   out of the world by then.
 - `prefers-reduced-motion` suppresses screen shake (see below).
-- `?selftest=1` grew from 29 to **60 assertions**: the `cpu`, `players`,
+- `?selftest=1` grew from 29 to **61 assertions**: the `cpu`, `players`,
   `render` and turn-guard-order groups M1 deliberately left unstubbed.
 
 Still not built, and deliberately so: the setup screen, the DOM HUD, scoring
@@ -390,7 +390,7 @@ python3 -m http.server 8000      # from the repo root
 open http://localhost:8000/castle-blasters/
 ```
 
-- `?selftest=1` — **60 assertions** over the pure functions and the rules
+- `?selftest=1` — **61 assertions** over the pure functions and the rules
   modules. Prints to the console and to a DOM list. **Does not start the match
   or the rAF loop**: the `cpu`, `world` and `players` groups build worlds of
   their own (4 players, a flattened castle, an unreachable target) and a live
@@ -405,7 +405,7 @@ open http://localhost:8000/castle-blasters/
   is the one the M2 budget is measured against.
 
 M1 shipped 29 assertions and left `cpu`, `players` and turn-guard-order
-unstubbed because the code did not exist. M2 added 31 more and closed those
+unstubbed because the code did not exist. M2 added 32 more and closed those
 groups — with one exception, stated so it is not mistaken for coverage:
 **awards are still not stubbed.** CHAMPION / BIGGEST BOOM / SILLY SHOT /
 GOOD GAME are M3, and a passing stub is worse than a missing test. What M2
