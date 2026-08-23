@@ -287,6 +287,7 @@ const CONFIG = {
 
   // palette
   COLOR: {
+    letterbox: '#1a2555',           // launcher navy — the bars, never the world
     sky0: '#8fd8ff', sky1: '#d9f2ff',
     dirt: '#6b3f1f', grass: '#4caf50',
     wood: '#d9a05b', stone: '#b8b8b8',
@@ -383,7 +384,6 @@ const players = {
     return this.list;
   },
 
-  living() { return this.list.filter(p => p.alive); },
 };
 
 /* =========================================================== world =======
@@ -592,8 +592,14 @@ const physics = {
     }
   },
 
-  castleOf(id) { return this.castles[id]; },
-  blocksOf(id) { return this.blocks.filter(b => b.castleId === id); },
+  /* No castle/block accessors here on purpose. M2's CPU and learn modules
+     need "STANDING" blocks, which the plan defines as all three of: the body
+     is still in the world, its centre is still inside its own castle's
+     horizontal slice, AND it is still upright and elevated (|angle| < 30 deg
+     and at least half a block above the platform). A naive
+     blocksOf(castleId) counts rubble lying flat on the ground as cover,
+     which skews CPU target selection toward already-flattened castles and
+     lets a bonus target land on rubble. Write the real predicate at M2. */
 
   /* --- projectile ------------------------------------------------------ */
   spawnProjectile(x, y, vx, vy) {
@@ -1156,26 +1162,32 @@ const turns = {
     if (state.curState === STATES.PLAYER_TURN) {
       if (!this.shotFired) return;
 
-      // 4. Backstop, first so it always wins.
-      if (this.turnSteps >= CONFIG.TURN_MAX_STEPS) {
+      /* Every decision below routes through `turnRules`, which is what
+         ?selftest=1 asserts. Do not reimplement these predicates inline: an
+         earlier draft did, and the six turn-lifecycle assertions were then
+         testing a parallel copy the game never ran, so breaking precondition
+         1 here would have left the harness green. */
+
+      // 4. Backstop, evaluated first so it always wins.
+      if (turnRules.forceEnd(this.turnSteps)) {
         physics.forceQuiet();
         this.forcedEnds++;
-        this.setState(STATES.TURN_RESULT);
-        this.resultSteps = 0;
+        this.endTurn();
         return;
       }
-      // 1. The projectile must be gone. A turn cannot end while it is a body.
-      if (physics.projectile) { this.calmSteps = 0; return; }
-      // 2. No damage-registering collision in the last QUIET_AFTER_IMPACT_STEPS.
-      if (physics.stepCount - physics.lastImpactStep < CONFIG.QUIET_AFTER_IMPACT_STEPS) {
-        this.calmSteps = 0; return;
-      }
-      // 3. Coarse calm for SETTLE_STEPS consecutive steps.
-      this.calmSteps = physics.worldIsCalm() ? this.calmSteps + stepsThisFrame : 0;
-      if (this.calmSteps >= CONFIG.SETTLE_STEPS) {
-        this.setState(STATES.TURN_RESULT);
-        this.resultSteps = 0;
-      }
+
+      const hasProjectile = physics.projectile !== null;
+      const sinceImpact = physics.stepCount - physics.lastImpactStep;
+
+      /* Preconditions 1 and 2 also reset the calm counter: nothing counts as
+         settled while a body is still in flight or a tower is mid-collapse. */
+      const blocked = hasProjectile || sinceImpact < CONFIG.QUIET_AFTER_IMPACT_STEPS;
+      this.calmSteps = blocked
+        ? 0
+        : turnRules.settleTick(this.calmSteps, physics.worldIsCalm(), stepsThisFrame);
+
+      // 1 + 2 + 3, in one predicate.
+      if (turnRules.canEndTurn(hasProjectile, sinceImpact, this.calmSteps)) this.endTurn();
       return;
     }
 
@@ -1191,6 +1203,12 @@ const turns = {
     }
   },
 
+  /* The one exit from PLAYER_TURN. There is no other way out. */
+  endTurn() {
+    this.setState(STATES.TURN_RESULT);
+    this.resultSteps = 0;
+  },
+
   step() { if (this.shotFired) this.turnSteps++; },
 };
 
@@ -1204,7 +1222,7 @@ const turnRules = {
   canEndTurn(hasProjectile, stepsSinceImpact, calmSteps) {
     if (hasProjectile) return false;
     if (stepsSinceImpact < CONFIG.QUIET_AFTER_IMPACT_STEPS) return false;
-    return calmSteps >= CONFIG.SETTLE_STEPS;
+    return this.isSettled(calmSteps);
   },
 };
 
@@ -1223,8 +1241,9 @@ const render = {
     const ctx = view.ctx;
     const W = view.canvas.width, H = view.canvas.height;
 
+    // Letterbox bars first, in device pixels, covering the whole backing store.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = CONFIG.COLOR.sky0 === null ? '#1a2555' : '#1a2555';
+    ctx.fillStyle = CONFIG.COLOR.letterbox;
     ctx.fillRect(0, 0, W, H);
 
     ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);

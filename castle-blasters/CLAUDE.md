@@ -90,6 +90,14 @@ milestone and an exit gate.
     `setState()`. `render`/`ui` never mutate state. `physics` records into a
     queue and never calls `audio` or `ui` directly.
 
+11. **`turns.frame()` routes every turn-end decision through `turnRules`.**
+    Do not reimplement those predicates inline. An earlier draft did, and the
+    six turn-lifecycle assertions in `?selftest=1` were then exercising a
+    parallel copy the game never ran — so breaking precondition 1 in the
+    shipped path would have left the harness green. `turnRules` is the
+    definition; `turns.frame` is the only caller; the selftest asserts the
+    definition. `turns.endTurn()` is the single exit from `PLAYER_TURN`.
+
 ## Measured performance budget
 
 The plan required this to be measured, not assumed, and required the number to
@@ -100,13 +108,14 @@ land in this file.
 
 | | avg | p50 | p95 | max |
 |---|---|---|---|---|
-| work per frame | 0.73 ms | 0.7 | **0.8 ms** | 2.2 ms |
-| — physics (3 fixed steps) | 0.50 ms | 0.5 | 0.6 ms | 2.0 ms |
+| work per frame | 0.73–0.74 ms | 0.7 | **0.8–0.9 ms** | 1.0–2.2 ms |
+| — physics (3 fixed steps) | 0.50–0.52 ms | 0.5 | 0.6 ms | 0.8–2.0 ms |
 | — render | 0.23 ms | 0.2 | 0.3 ms | 0.4 ms |
 | rAF interval | 16.67 ms | 16.7 | 17.6 | 17.7 |
 
-**= 4.8% of a 16.67 ms frame at p95.** Holding a full-power drag (the arc
-recomputes every frame) takes it to **1.0 ms p95, 6.0%**.
+**= 4.8–5.4% of a 16.67 ms frame at p95**, across repeated runs. Holding a
+full-power drag (the arc recomputes every frame) takes it to **1.0 ms p95,
+6.0%**.
 
 `work` is the number that matters. The rAF interval is vsync-locked, so it
 only says "60 fps is being held" — it cannot show headroom.
