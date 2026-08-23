@@ -143,7 +143,7 @@ Canvas, fixed world, ground from a descriptor, one castle of wood blocks, one ch
 
 `players[]`, `setState()` and the **`PLAYER_TURN ⇄ TURN_RESULT` loop** all exist from the first line — M1 runs one slot that cycles between those two states. This is not optional scaffolding: without the loop the input lock is never cleared (see Input safety) and the player gets exactly one shot ever, and the turn-end machinery M1 is supposed to certify never runs.
 
-Ships `manifest.json` + `service-worker.js` so it installs on the tablet.
+Ships `manifest.json` + `service-worker.js` so it installs on the tablet — but the SW is **network-first through M3**, flipping to cache-first at M4 (one constant). A cache-first SW during rapid iteration means the tablet serves yesterday's build unless the version is bumped every single push, and the one milestone whose entire job is judging *feel* must not be judged against a stale file.
 
 **Exit gate:** hand the tablet to the 4-year-old with no explanation. They fire a shot within 30 seconds and ask to do it again. Plus: the performance budget is measured, not assumed, and no projectile tunnels a block at max power.
 
@@ -185,9 +185,33 @@ Single `castle-blasters/index.html`, IIFE-wrapped, organised as named sections. 
 | `ui` | DOM overlays and DOM HUD. |
 | `store` | `localStorage`. |
 
+**Dependency direction (a hard rule, because nothing in a single-file IIFE enforces it).**
+Modules may only call *downward* in this order:
+
+```
+CONFIG → store → state → world / players / turns → physics → cpu / learn → audio → render → ui
+```
+
+Three consequences worth stating outright:
+- **Only `turns` calls `setState()`.** Every other module returns a value or raises an intent; none of them transition the machine. This is what stops a turn ending twice.
+- **`render` and `ui` never mutate game state.** They read it and emit actions. `render` additionally never allocates per frame (see Performance).
+- **`physics` never calls `ui` or `audio` directly.** It records what happened; `turns` decides what that means and who gets told.
+
+Without this, a 2,000-line file where any function can reach any other becomes unworkable around M4, and the symptom is always the same: two code paths both advancing the turn.
+
 ### Viewport and world
 
 **One fixed world, no camera, no scrolling.** `WORLD_W = 1024`, `WORLD_H = 768`. All game logic works in world units. The renderer computes one uniform scale `s = min(canvas.w / WORLD_W, canvas.h / WORLD_H)`, centres the world, and letterboxes the remainder with the launcher navy `#1a2555`. The backing store is sized at `devicePixelRatio` and the context scaled once. **Every number in this document is a CSS px in world space**, never a device pixel.
+
+**Pointer input must be inverse-transformed through the same scale and offset.** Not optional, and the easiest thing in this design to get silently wrong:
+
+```js
+const r = canvas.getBoundingClientRect();
+worldX = (clientX - r.left - offsetX) / s;
+worldY = (clientY - r.top  - offsetY) / s;
+```
+
+Using raw client or canvas coordinates puts every touch off by the width of the letterbox bars. On a 4:3 tablet in landscape those bars are zero, so it *appears* correct on the primary device and aiming is then completely broken in portrait, which Success Criteria lists as a tested case. There is exactly one `toWorld(clientX, clientY)` helper and every pointer handler goes through it.
 
 **Coordinate convention: +y is DOWN, everywhere, matching Matter.** `y = 0` is the top of the world, `y = 768` the bottom. There is no second convention anywhere in this design.
 
@@ -203,7 +227,58 @@ Crane Stacker passes a variable `dt` (`crane-stacker/index.html:790,795`). **Do 
 
 Why this rate specifically: it is the largest step at which the fastest projectile travels well under its own radius per step, which is what removes the tunnelling risk (below).
 
-### Physics constants (all in `CONFIG`, all tuned as one set)
+### CONFIG — the single consolidated block
+
+The rule "every tunable in one block, nothing inline" only holds if there is one block to copy. Here it is. Sections below explain the derivations; this is the thing you paste.
+
+```js
+const CONFIG = {
+  // world + timestep
+  WORLD_W: 1024, WORLD_H: 768,
+  STEP_MS: 16.666 / 3,            // 5.5555 — one rate, always
+  MAX_STEPS_PER_FRAME: 8,
+
+  // physics
+  GRAVITY_Y: 1, GRAVITY_SCALE: 0.001,   // Matter defaults, stated because all ballistics depend on them
+  BLOCK: { w: 40, h: 40, chamfer: 4, density: 0.004,
+           friction: 0.95, frictionStatic: 1.2, restitution: 0.05 },
+  PROJECTILE: { radius: 18, density: 0.008, friction: 0.4,
+                restitution: 0.2, frictionAir: 0 },
+  CHARACTER: { w: 36, h: 44, chamfer: 8, density: 0.003,
+               friction: 0.9, frictionStatic: 1.0, restitution: 0.05 },
+  MAT_HITS: { wood: 1, stone: 2 },
+  IMPACT_HIT: 60,
+
+  // aiming
+  MIN_DRAG: 28, MAX_DRAG: 220,
+  MIN_SPEED: 5, MAX_SPEED: 18, POWER_EXP: 1.35,
+  SPAWN_OFFSET_Y: 30, SPAWN_GRACE_STEPS: 3,
+  ARC_MAX_STEPS: 420, ARC_DOT_EVERY: 8,
+
+  // turn lifecycle
+  PROJECTILE_REST_V: 0.5, PROJECTILE_REST_STEPS: 10, PROJECTILE_MAX_STEPS: 300,
+  SETTLE_V: 1.2, SETTLE_W: 0.08, SETTLE_STEPS: 20, QUIET_AFTER_IMPACT_STEPS: 30,
+  TURN_MAX_STEPS: 2160,           // 12s of simulated time
+
+  // match
+  HEARTS: { 2: 3, 3: 2, 4: 2 },   // scales with player count — see Health
+  ROUND_MAX: 12,
+  PLATFORM_DY_MAX: 80,            // bounds the MAX_SPEED derivation
+
+  // cpu (v1 ships easy only)
+  CPU: { angleErrDeg: 12, powerJitter: 0.08,
+         sillyShotChance: 0.12, thinkMs: 700 },
+
+  // learning
+  BONUS_CHANCE: 0.5,
+  LABEL_MIX: { 9: { letters: 5, numbers: 4 }, 12: { letters: 7, numbers: 5 } },
+
+  // ui
+  BUTTON_DEBOUNCE_MS: 400, FONT_TIMEOUT_MS: 2000,
+};
+```
+
+### Physics constants — derivations
 
 ```
 engine.gravity.y      = 1        // Matter default, stated because everything below depends on it
@@ -224,8 +299,16 @@ character:  w 36, h 44, chamfer 8, DYNAMIC, density 0.003, friction 0.9,
 
 - Longest shot the game can require: P1 → P4 at 4 players, castle centres at x = 128 and 896, so **768 px**.
 - `v_required = √(768 × 0.2778) = 14.6`.
-- **`MAX_SPEED = 18`** (≈25% headroom, `R ≈ 1166` px).
+- **`MAX_SPEED = 18`** (`R ≈ 1166` px on flat ground).
 - **`MIN_SPEED = 5`** (`R ≈ 90` px, a short lob that lands just in front of you).
+
+**The flat-ground derivation is not sufficient on its own, because M2 adds stepped platforms.** Firing *uphill* costs range. For a target `h` px higher, max range is `R = (v²/g)·√(1 − 2gh/v²)`. Bounding platform height deltas at **`PLATFORM_DY_MAX = 80`** and solving for the same 768 px shot:
+
+```
+u² − 44.5u − 45540 = 0   (u = v²)   →   u = 236.8   →   v_required = 15.4
+```
+
+So an uphill 768 px shot needs 15.4 against 14.6 on the flat. **`MAX_SPEED = 18` still carries ~17% headroom and does not change** — but the number is only justified while `PLATFORM_DY_MAX ≤ 80`. **Re-verify this at M2** when the actual heights are chosen; if a platform delta exceeds 80 px, `MAX_SPEED` must be re-derived, and the M1 power-curve tuning goes with it.
 
 An earlier draft used `MAX_SPEED = 26`, which gives `R ≈ 2430` px in a 1024 px world — 2.4× the world width. That would have put the entire playable range into the first 55% of the drag and left 45% of a preschooler's gesture as undifferentiated overshoot.
 
@@ -257,7 +340,11 @@ Player colours are checked against both block materials and the UI gold. Every p
 
 ### Art direction
 
-**All in-game art is canvas-drawn primitives** — rectangles, circles, arcs, simple paths. No sprite sheets, no image assets, no emoji-as-art. The only images that ship are the four PWA icons from `_make_icons.py`. Four characters, distinguished by silhouette and colour, **with no mechanical differences**, auto-assigned by slot. There is no character picker in v1.
+**All in-game art is canvas-drawn primitives** — rectangles, circles, arcs, simple paths. No sprite sheets, no image assets, no emoji-as-art. The only images that ship are the four PWA icons from `_make_icons.py`.
+
+**Two character silhouettes in v1**, not four: one "kid" shape and one visibly different "robot" shape, so a non-reader can tell a human slot from a CPU slot at a glance. They are tinted by the player's slot colour, and they have **no mechanical differences**. Auto-assigned by slot; there is no character picker. Four distinct silhouettes was four times the art for zero gameplay difference, and the human/robot distinction is the only one that carries information.
+
+**Facing** is a render concern only — flip on `sign(dir.x)`. See Aiming.
 
 **Fonts must be loaded before the first draw.** `ctx.fillText` with a webfont that has not arrived silently falls back and does **not** re-render when it does. Every block carries a label, so this is visible on the first frames of every session. `await document.fonts.load('40px "Lilita One"')` and `await document.fonts.ready` before the first `render()`, with a plain-coloured splash until then.
 
@@ -298,11 +385,10 @@ Guards are evaluated **top to bottom in the order listed**; the first match wins
 { id: 1, name: 'PLAYER 1', kind: 'human' | 'cpu',
   characterId: 'nim', color: '#2eb8ff', castleId: 0,
   hearts: 3, alive: true, score: 0,
-  stats: { blocksFelled: 0, bestShotDamage: 0, targetsHit: 0,
-           directHits: 0, selfHits: 0 } }
+  stats: { bestShotDamage: 0, selfHits: 0 } }
 ```
 
-CPU difficulty is a **single match-wide setting** (`cpuLevel: 'easy' | 'medium' | 'hard'`, default `easy`, set in parent settings, persisted), not a per-slot field. A per-slot field with no UI to set it would leave the silly shot — one of the three things this product is for — permanently unreachable.
+**v1 ships one CPU difficulty: easy.** No `cpuLevel` field, no settings control, no persisted key. An earlier draft carried three tiers as a per-slot field with no UI to set it, which left the silly shot — one of the three things this product is for — permanently unreachable. Easy is the tier the 4-year-old plays; medium and hard land when a human actually asks for them, and the error bands below are already written so that adding them is one object.
 
 `castleId` is separate from `id` because it is needed as a castle index regardless, and because v2 teams need several players to share one castle.
 
@@ -329,6 +415,8 @@ Keeping ground and castle as plain descriptors is what lets M1's power-curve tun
 
 ### Layout and block budget
 
+Castle centres are a **formula**, not a table: `centre_i = WORLD_W × (i + 0.5) / n`. The table below is the worked example derived from it — do not hardcode the numbers. This is what makes P5's "the range is data, not surgery" claim true rather than aspirational: adding a fifth slot becomes a config change instead of arithmetic someone has to redo.
+
 Block 40 × 40. Castle footprint 3 columns (120 px).
 
 | Players | Slice | Castle centres | Gap | Blocks | Rows |
@@ -348,31 +436,56 @@ Castles sit on stepped platforms at alternating heights so a far castle is not f
 - **Power curve:** `speed = MIN_SPEED + (|drag| / MAX_DRAG) ^ 1.35 × (MAX_SPEED − MIN_SPEED)`, i.e. 5 → 18. The exponent gives fine control at low power. Tuned at M1.
 - **Firing:** `Body.setVelocity(projectile, { x: dir.x * speed, y: dir.y * speed })`. The slingshot band is **drawn**, never simulated with a `Constraint`.
 - **Trajectory preview:** computed by **iterating the exact same integrator the engine uses**, for up to **420 steps**, plotting every 8th point as a dot. 420 is not arbitrary: at `STEP_MS = 5.5555` the longest required shot (768 px at `v ≈ 14.6`) takes **222 steps**, a flat-out max-power 45° shot takes **274**, and a near-vertical lob at `MAX_SPEED` takes about **389**. A 200-step cap — which an earlier draft carried over from a one-step-per-frame design — would have stopped the 4-player arc roughly 80 px short of the enemy castle while it was still descending, on exactly the shot `MAX_SPEED` was derived from. Do **not** use a closed-form parabola. Matter's `Body.update` (matter.js:2332-2338) updates velocity and *then* advances position by the new velocity, so the true closed form is `p(n) = p₀ + u·n + a·n(n+1)/2`, not `p₀ + u·n + ½·a·n²`. The `½·a·n` difference is linear in n: at `STEP_MS = 5.5555` it is about **3.4 px** on the longest required shot and about **6 px** on a near-vertical lob. Small, but it grows with flight time and it is free to avoid — iterating is a few hundred adds per frame and is exact by construction, where a closed form has to be re-derived every time the step rate changes. This is also why the projectile has `frictionAir: 0`: any non-zero value makes the path non-parabolic *and* step-rate-dependent.
+- **Recompute cadence:** the arc is recomputed **at most once per animation frame**, not per `pointermove`. Store the latest drag vector in the event handler and do the work in the rAF loop. Naively, 420 steps against 36 blocks is ~15,000 intersection tests, and `touchmove` fires 60-120 times a second on an iPad. Additionally, pre-filter to blocks whose x-range the arc actually crosses; that typically drops it to one castle's worth.
 - **Truncation:** the arc stops at the first ground or block intersection, at the **cull bounds** (`x < −200 || x > WORLD_W + 200 || y > WORLD_H + 200`), or at 420 steps, whichever comes first. Note the cull bounds and not `y = 0` on the top edge: a near-vertical shot legitimately climbs above the world to about `y = −43` and comes back, and truncating at the top of the screen would draw a lie.
 - **Minimum drag:** `MIN_DRAG = 28`. Releasing below it **cancels the shot** rather than firing it. Without this, the activation region is a 256 × 768 px slab in which any stray tap fires a live 90 px lob and burns the turn — for a player the rest of this document is explicitly designing around double-taps and imprecise touch (§7).
-- **Spawn:** the projectile spawns 30 px above the character's top edge, and collides with nothing for its first 3 steps, so a low-power shot cannot detonate on the shooter's own castle at the moment of launch.
+- **Spawn:** the projectile spawns `SPAWN_OFFSET_Y` (30 px) above the character's top edge, and collides with nothing for its first `SPAWN_GRACE_STEPS` (3), so a low-power shot cannot detonate on the shooter's own castle at the moment of launch.
+- **Facing is a render concern only, not an aiming one.** The gesture is already symmetric: pull right, fire left. A player on the right side of the world pulls right and fires left with no special-casing. What *does* need mirroring is the drawn character's facing and the slingshot band, both flipped on `sign(dir.x)`. No mirrored aiming rules exist or are needed.
 
 ### Turn end (this is what prevents soft locks)
 
-The turn timer is deferred, so this is the **only** thing that ends a turn. Two conditions, whichever fires first:
+The turn timer is deferred, so this is the **only** thing that ends a turn. Three conditions in sequence, then a backstop.
 
-1. **Settled.** Every dynamic body satisfies `|velocity| < 0.2 && |angularVelocity| < 0.02` for 20 consecutive fixed steps (≈111 ms).
-2. **Hard cap.** `TURN_MAX_STEPS = 2160` accumulated fixed steps from the moment of firing (12 s of simulated time at `STEP_MS`). Matter bodies can jitter below any reasonable threshold indefinitely. On expiry, zero all velocities, then transition.
+**1. The projectile is removed.** A turn cannot end while the projectile is still a body. It is removed as soon as any of these holds: `|velocity| < PROJECTILE_REST_V (0.5)` for `PROJECTILE_REST_STEPS (10)`; it crosses the cull bounds; or `PROJECTILE_MAX_STEPS (300)` elapse since firing. **This is mandatory, not tidiness.** A projectile that comes to rest and is never removed stays a dynamic body forever: it blocks the settle predicate below, it collides on somebody else's turn, and if `inputLocked` clears only when "no projectile is in flight" it holds the lock shut and soft-locks the game.
 
-   **Counted in simulation steps, not wall clock, and deliberately so.** A `performance.now()` deadline would expire while the game sits in `PAUSED`, and the state table has no `PAUSED → TURN_RESULT` edge — so the transition would either be dropped (the turn never ends after resume) or fire out of `PAUSED` and break the single-owner `inputLocked` discipline. Steps do not advance while paused, so the problem cannot arise.
+**2. No recent impact.** No damage-registering collision in the last `QUIET_AFTER_IMPACT_STEPS (30)` steps (167 ms). Stops a turn ending in the half-beat between a tower being hit and it starting to fall.
 
-Either path transitions `PLAYER_TURN → TURN_RESULT`. There is no third path.
+**3. Coarse calm.** Every dynamic body satisfies `|velocity| < SETTLE_V (1.2)` and `|angularVelocity| < SETTLE_W (0.08)` for `SETTLE_STEPS (20)` consecutive steps.
 
-This predicate is **inspired by, not identical to**, Crane Stacker's. `crane-stacker/index.html:741-745` tracks `restFrames > 20` per block since landing, in a `WeakMap`, under a variable `dt`, to count landings. This one is a global check over all dynamic bodies on a fixed step. Same thresholds, different scope; write it fresh rather than copying the function.
+**Why the thresholds are coarse rather than fine.** An earlier draft used `|v| < 0.2 / |ω| < 0.02` — near-perfect stillness from every one of ~60 bodies. Combined with `enableSleeping: false` (which is itself correct, and required, or destroyed supports leave blocks hanging), that predicate would have run almost every turn to the 12-second cap, because one block jittering anywhere in any castle blocks it. At 40 px blocks, motion below the coarse threshold is invisible. The question the predicate should answer is "is anything still meaningfully moving?", not "is everything perfectly still?"
+
+**4. Backstop.** `TURN_MAX_STEPS = 2160` accumulated fixed steps from the moment of firing (12 s of simulated time). On expiry: remove the projectile, zero all velocities, transition.
+
+**Counted in simulation steps, not wall clock, and deliberately so.** A `performance.now()` deadline would expire while the game sits in `PAUSED`, and the state table has no `PAUSED → TURN_RESULT` edge — so the transition would either be dropped (the turn never ends after resume) or fire out of `PAUSED` and break the single-owner `inputLocked` discipline. Steps do not advance while paused, so the problem cannot arise.
+
+**Performance: check once per rendered frame, not once per physics step.** The fixed step runs at 180 Hz; the natural implementation (`Composite.allBodies(world).filter(...)`, as at `crane-stacker/index.html:737`) allocates two arrays per call, which at 180 Hz over ~60 bodies is ~360 short-lived arrays a second of pure GC churn on a battery-powered tablet. Instead: maintain a live `dynamicBodies` array updated on add and remove, and evaluate the predicate once per rAF frame. `SETTLE_STEPS = 20` at 180 Hz is 111 ms, so a 60 Hz check still samples it 6-7 times. Same behaviour, a third of the work, zero allocation.
+
+Any path transitions `PLAYER_TURN → TURN_RESULT`. There is no other way out.
+
+### Character placement (decided, not open)
+
+**The character stands on top of its own castle.** This was an open question in the office-hours draft; it is a decision here, because it is architectural rather than cosmetic — it sets the launch origin, the CPU's aim point, the fall check, and the spawn-collision grace, and every one of those is load-bearing before M1's power curve can be tuned.
+
+Consequences, all of which follow from it:
+- **Launch origin** is the character's top edge plus `SPAWN_OFFSET_Y`, which sits above the castle, so a low-power shot clears your own parapet (with `SPAWN_GRACE_STEPS` as the belt-and-braces).
+- **CPU aim point** is the lowest standing block, which topples the stack *and* the character on it. One shot, two outcomes.
+- **Fall detection** has a natural cause: destroying the castle drops the character, and "you lose when your guy falls" is literally true rather than a slogan.
+- **Castle readability** is unaffected; the character sits above the 3-column footprint, not inside it.
+
+The alternative (character beside the castle on the ground) is cheaper but makes castle and character two separate targets, which is one more thing to explain to a 4-year-old and removes the connection between wrecking a castle and winning.
 
 ### Health and elimination
 
-**Hearts are the only health model, and only the character carries them.** Each player starts with `hearts: 3`, drawn as three countable pips, never a bar (§28).
+**Hearts are the only health model, and only the character carries them.** Drawn as countable pips, never a bar (§28).
+
+**Hearts scale with player count:** `HEARTS = { 2: 3, 3: 2, 4: 2 }`. The plan guarantees a match *ends*; this is what makes it end *soon enough*. Four players, three hearts each, a bot that mostly misses, a 700 ms think pause and a pass screen per turn adds up to a plausibly 15-minute match, and the attention span of a 4-year-old is the entire product thesis. Dropping to two hearts at 3-4 players roughly halves the worst case and touches nothing else.
 
 - Character struck by a projectile above `IMPACT_HIT` → **−1 heart**, capped at one heart per incoming shot.
 - **Character falls.** Checked once at turn end: if the character's centre has ended up more than **120 px below its own platform's top surface**, or outside its own castle's horizontal slice, it fell → **−1 heart**, and it is then repositioned standing on whatever remains of its castle (or on the bare platform if the castle is gone). At most one fall-heart per turn, and it does not stack with the projectile-hit heart in the same turn.
 - Character culled off-screen (past the world bounds entirely) → **immediate elimination**, regardless of hearts.
 - `hearts === 0` → eliminated.
+
+**Self-hits count.** A projectile that damages its own shooter's character costs that player a heart exactly as an opponent's would. Scoring separately awards `0 OOPS!` rather than negative points (§2.3), but the physics are real. This is deliberate: the CPU silly shot is only funny if it actually costs the bot something, and a kid who lobs one straight up and lands it on their own head should get the honest outcome, not a special case.
 
 The fall rule is what makes the slogan literally true. Without it, knocking an enemy character off its collapsing castle onto the ground at `y ≈ 700` costs nothing at all, because the cull bound is `y > 968` — falling would only matter off the left and right edges, which almost never happens. The character body is dynamic (see Physics constants) specifically so it can be toppled.
 
@@ -398,38 +511,41 @@ Points, shown with the reason as a floating label (§23):
 
 Bonus targets only ever appear on an **opponent's** castle, so `+150 GREAT FIND!` and `OOPS!` can never contend for the same collision.
 
-**Awards.** Assigned greedily in this order; each has a `> 0` precondition, and any player left without one gets 🎈 **GOOD GAME**. Ties break to the lower player id.
+**Awards.** Three, assigned in order, each with a `> 0` precondition; anyone left over gets the fallback. Ties break to the lower player id.
 
 | Order | Award | Source | Precondition |
 |---|---|---|---|
 | 1 | 🏆 CHAMPION | the match **winner** | always (exactly one) |
 | 2 | 💥 BIGGEST BOOM | highest `bestShotDamage` | `> 0` |
-| 3 | 🧱 WALL BREAKER | most `blocksFelled` | `> 0` |
-| 4 | ⭐ LEARNING STAR | most `targetsHit` | `> 0` |
-| 5 | 🎯 GREAT AIM | most `directHits` | `> 0` |
-| 6 | 😄 SILLY SHOT | most `selfHits` | `> 0` |
+| 3 | 😄 SILLY SHOT | most `selfHits` | `> 0` |
 | — | 🎈 GOOD GAME | fallback | anyone still unawarded |
 
-**CHAMPION is the winner, not the high scorer.** The win condition is last-player-standing with points as the tiebreak, so a score-based CHAMPION could print "PLAYER 3 WINS" beside "🏆 CHAMPION: PLAYER 1" on the same screen, in front of a 4-year-old. The preconditions matter for the same reason: with `learnMode: 'off'` every player has `targetsHit: 0`, and an award for hitting zero targets in a mode where targets do not exist is worse than no award.
+**CHAMPION is the winner, not the high scorer.** The win condition is last-player-standing with points as the tiebreak, so a score-based champion could print "PLAYER 3 WINS" beside "🏆 CHAMPION: PLAYER 1" on one screen in front of a 4-year-old.
+
+The preconditions are why this is three awards and not seven. An earlier draft had six stat-derived awards plus a fallback, which meant with `learnMode: 'off'` somebody won ⭐ LEARNING STAR for hitting zero targets in a mode where targets do not exist. Three awards, one tracked stat pair, and a fallback that reads as generous rather than consolation.
 
 ### CPU
 
 **Target selection:** among living opponents, the one whose castle has the **fewest** standing blocks; ties to nearest. Then aim at the **lowest standing block** of that castle — toppling from the base is both more effective and more spectacular. Targeting the weakest is also what makes matches end; targeting the healthiest opponent would mean the CPU never finishes anyone off and, at 4 players with ±12° error, a match could run past twenty rounds.
 
-**"Standing"**, used here and in scoring, means: the block body is still present in the world (not culled or destroyed) **and** its centre is still within its own castle's horizontal slice. A block knocked into a neighbouring slice is debris, not cover.
+**"Standing"** means all three of: the block body is still present in the world (not culled or destroyed); its centre is still within its own castle's horizontal slice; **and** it is still upright and elevated — `|angle| < 30°` from its original orientation **and** its centre is at least half a block above its platform's top surface. The last clause matters: without it a block lying flat on the ground inside its own slice counts as cover, which skews CPU target selection ("fewest standing blocks") toward castles that are already flattened and lets `learn` put a bonus target on rubble.
+
+**When a living opponent has no standing blocks** — their castle is gone but their character still has hearts — both consumers need a stated fallback, or they hit an empty list:
+- `cpu`: target the opponent's **character** directly.
+- `learn`: skip bonus-target selection for that castle; if no living opponent has an eligible block, no target spawns this turn. Never a crash, never an empty prompt.
 
 **Solution:** solve the ballistic angle for the target at a chosen speed. `MAX_SPEED` reaches 1166 px against a longest required shot of 768 px, so a solution always exists on open ground; the failure case is an intervening castle. Fallback chain: (a) retarget to the nearest living opponent, (b) if still blocked, fire at max power at 45° toward the target. Never a skipped turn.
 
-**Error injection:** angle error sampled uniformly from ±12° (easy), ±6° (medium), ±2° (hard); power jitter ±8% / ±4% / ±1%.
+**Error injection:** angle error sampled uniformly from ±`CPU.angleErrDeg` (12°), power jitter ±`CPU.powerJitter` (8%). Shaped as config so medium (±6° / ±4%) and hard (±2° / ±1%) are a data change if they are ever wanted.
 
-**Silly shot.** On easy only, **12% of shots** are replaced by a deliberate near-vertical launch (75–88°, low-to-mid power) that lands on or near the bot's own castle. Angular error alone lands short or long on the correct side and essentially never behind the shooter, so this is the only mechanism that produces the self-demolition described in What Makes This Cool.
+**Silly shot.** **`CPU.sillyShotChance` (12%) of shots** are replaced by a deliberate near-vertical launch (75–88°, low-to-mid power) that lands on or near the bot's own castle. Angular error alone lands short or long on the correct side and essentially never behind the shooter, so this is the only mechanism that produces the self-demolition described in What Makes This Cool.
 
-**Presentation:** a 700 ms "thinking" pause, then a visible aim animation using the same dotted arc a human sees, then fire. The kid gets to watch the bot line up and miss.
+**Presentation:** a `CPU.thinkMs` (700 ms) "thinking" pause, then a visible aim animation using the same dotted arc a human sees, then fire. The kid gets to watch the bot line up and miss.
 
 ### Learning (`learn`)
 
 - **Label generation.** Every castle is built with a fixed mix: **5 letters and 4 numbers** in the 9-block layouts, **7 and 5** in the 12-block layout, positions shuffled per match. Letters are drawn from A–Z, digits from 0–9, without repeats inside one castle. This mix is not cosmetic — it guarantees that both `letters` and `numbers` mode always find an eligible block on every castle, which a purely random labelling does not.
-- **Cadence:** at most one bonus target per turn, on 50% of turns, only when `learnMode ≠ 'off'`. The target castle is chosen uniformly from **living opponents** (never the active player's own), then the block uniformly from that castle's standing blocks whose label matches the mode. Cleared at turn end whether hit or not.
+- **Cadence:** at most one bonus target per turn, on `BONUS_CHANCE` (50%) of turns, only when `learnMode ≠ 'off'`. The target castle is chosen uniformly from **living opponents** (never the active player's own), then the block uniformly from that castle's standing blocks whose label matches the mode. If no living opponent has an eligible standing block, no target spawns — see the CPU section's fallback. Cleared at turn end whether hit or not.
 - **Prompt:** the block glows with a `#ffd700` ring, the HUD prompt pill shows `HIT 7`, and TTS speaks "hit the seven." Visual and audio both, never audio alone (§27).
 - **On miss:** nothing. No sound, no message, no penalty (§2.3).
 - **`learnMode: 'off'` means:** blocks **keep their labels** (the labels are the art, and removing them would change every castle), nothing is spoken, and no bonus targets ever spawn. Off removes the prompts, not the alphabet.
@@ -454,6 +570,8 @@ Copy from Crane Stacker, and note that the important parts are not the obvious o
 - **The `rate = 10`, `volume = 0` unlock utterance on the first user gesture** (`crane-stacker/index.html:300-310`). Without it iOS never speaks.
 - **`AudioContext` needs the same treatment:** create it lazily and call `ctx.resume()` inside the first user-gesture handler, or WebAudio is silent on iOS.
 
+**Guard every entry point.** Both existing apps do (`crane-stacker/index.html:277` and `:303`, each `if (!('speechSynthesis' in window)) return;`). This plan calls TTS from inside the bonus-target prompt *during a turn*, so an unguarded throw there takes the turn with it. `speechSynthesis` may be absent, `getVoices()` may stay empty forever, and `new AudioContext()` may throw — all three return early or no-op rather than propagating.
+
 Synthesized cues, no files: **boom** (white-noise burst through a lowpass sweeping 1200→80 Hz, 400 ms), **launch** (rising sine sweep, 120 ms), **thunk** (short filtered click), **ding** (decaying 880 Hz sine).
 
 ### Reduced motion
@@ -462,9 +580,44 @@ Synthesized cues, no files: **boom** (white-noise burst through a lowpass sweepi
 
 ### Persistence
 
-`localStorage`, single key `castleBlasters.v1`. Exactly four things: `learnMode` (`off`/`letters`/`numbers`), `soundOn`, `reduceMotion`, `cpuLevel`.
+`localStorage`, single key `castleBlasters.v1`. Exactly three things: `learnMode` (`off`/`letters`/`numbers`), `soundOn`, `reduceMotion`. (`cpuLevel` is gone — v1 ships easy only; see CPU.)
+
+**Wrap every read and write in `try/catch`**, matching what both existing apps already do (`crane-stacker/index.html:389`, `printables/index.html:590,595`). Safari private mode throws on `setItem`. A settings write must never be able to take down a match.
 
 Deliberately **not** persisted: match state, scores, player counts, slot configurations, high scores. A "high score" is meaningless in a local free-for-all, and a half-restored match is more confusing than a fresh one. A refresh mid-match returns to `HOME`. This mirrors the reasoning already recorded in `printables/CLAUDE.md` about not restoring a half-built sheet.
+
+### Boot and failure paths
+
+The app is offline-first, but the **first** load needs `cdn.jsdelivr.net` and `fonts.googleapis.com`. Three things must not be silent.
+
+**1. Matter.js missing.** After the script tag, check `window.Matter`. If absent (captive portal, blocked CDN, hotel wifi), render a **retry card** on the canvas — a big friendly button, one line of text, no error codes — instead of leaving a blank blue rectangle. Today's failure mode is a 4-year-old tapping nothing for thirty seconds and handing the tablet back.
+
+**2. Fonts slow or missing.** Race `document.fonts.ready` against `FONT_TIMEOUT_MS` (2000). Whichever resolves first, draw. `ctx.fillText` with an unloaded webfont silently falls back and never re-renders, and every block carries a label, so the alternative is either a hang or a permanently wrong-looking game.
+
+*Verified, so it does not need solving twice:* the gstatic `.ttf` files behind the Google Fonts CSS are **not** precached by any service worker in this repo — but `crane-stacker/service-worker.js:48-62` is cache-first **with runtime caching** (`cache.put` on every successful GET), so they are cached after the first online load. Since the first load requires a network anyway, the offline path is already covered. Copy that SW structure and the problem does not exist.
+
+**3. Service worker install.** Copy `crane-stacker/service-worker.js`'s split precisely: `CORE_ASSETS` via `cache.addAll` (must succeed), `EXTERNAL_ASSETS` via individual `cache.add(...).catch(() => null)` (best-effort). A naive SW that puts the CDN URLs in `addAll` fails the whole install on one jsdelivr blip and the app never becomes offline-capable.
+
+### Testing — the `?selftest=1` harness
+
+There is no test infrastructure in this repo: no `test/`, no CI, no `package.json`. Workspace `CLAUDE.md` forbids a build step and npm, so vitest and jest are structurally unavailable. That is not a reason to ship untested.
+
+**The harness lives in the same `index.html`, behind `?selftest=1`.** It runs plain assertions over the pure functions, prints pass/fail to the console and to a DOM list, and is skipped entirely on a normal load. No build step, no dependencies, and it runs on the actual tablet.
+
+26 assertions, grouped:
+
+| Module | Asserts |
+|---|---|
+| `aim` | `powerCurve(0) === MIN_SPEED`; `powerCurve(MAX_DRAG) === MAX_SPEED`; monotonic across the range; `drag < MIN_DRAG` cancels; drag clamps at `MAX_DRAG` |
+| `aim` | preview arc matches the engine's own integration after N steps; a 768 px shot completes inside `ARC_MAX_STEPS`; arc truncates at cull bounds, not at `y = 0` |
+| `cpu` | targets the **fewest** standing blocks; 768 px is solvable at `MAX_SPEED`; unsolvable → 45° fallback, never a skipped turn; silly shot fires ≈12% |
+| `turns` | settle needs `SETTLE_STEPS` consecutive; `TURN_MAX_STEPS` force-ends; guard order puts no-humans-alive ahead of round rollover; next-player branches human vs CPU |
+| `physics` | `impact = |relNormalV| × 7.98`; below `IMPACT_HIT` pushes without damaging; wood 1 hit, stone 2; cull fires on all four bounds |
+| `players` | heart lost on projectile, on fall, on cull; at most one per incoming shot; self-hits damage; CHAMPION is the winner not the top scorer; every player gets exactly one award and none on a zero stat |
+| `world` | centres for n=2,3,4 match `WORLD_W × (i+0.5)/n`; label mix guarantees both `letters` and `numbers` always find an eligible block |
+| `boot` | `window.Matter` absent → retry card path taken |
+
+**What the harness deliberately does not cover, so it never creates false confidence:** pointer-to-world mapping under letterboxing, service-worker freshness, font readiness, iOS audio and TTS unlock, print-or-save, tunnelling under real collision, and whether the drawn arc *visually* matches the flight. Those are integration failures on a real device and they belong to the `/qa` pass against §36 — 21 paths, listed in the test plan artifact. The harness proves the maths; `/qa` proves the game.
 
 ### Performance budget (measured at M1, not assumed)
 
@@ -476,11 +629,9 @@ Deliberately **not** persisted: match state, scores, player counts, slot configu
 
 ## Open Questions
 
-1. **Ground descriptor and stepped-platform heights — resolve the descriptor shape before M1**, tune the heights at M2. M1 tunes the power curve against whatever ground exists, so the descriptor must be in place first even if it starts flat.
-2. **Character placement — resolve before M1, because the elimination model depends on it.** Recommendation: the character stands **on top of its own castle**, Worms-style, so one shot can both damage the castle and topple the character, and "you lose when your guy falls" has a natural cause. The alternative (character on the ground beside the castle) is cheaper but makes castle and character two separate targets, which is more to explain to a 4-year-old.
-3. **Codex's falsification test for P5, retained.** Prototype at 4 players on the reference iPad. If castles stay readable and turns stay under ~10 seconds, 4 is safe. If not, make 2 the default with a 4-row castle. Run at the end of M2.
-4. **`ROUND_MAX` value.** Set to 12 as a starting point, with the match resolving on points if it is reached. Real play should confirm whether a match ever gets near it; if matches routinely end by round 5, the cap is just a safety net and can stay.
-5. **Number of shipped characters.** Four, canvas-drawn, no mechanical differences, auto-assigned. Two would also be defensible. Not a blocker.
+1. **Stepped-platform heights — the descriptor shape is settled, the values are not.** M1 tunes the power curve against flat ground; M2 introduces height. The `MAX_SPEED` derivation is only valid while `PLATFORM_DY_MAX ≤ 80` (see Physics constants). **Re-verify at M2:** if any platform delta exceeds 80 px, `MAX_SPEED` must be re-derived and the M1 power-curve tuning goes with it.
+2. **Codex's falsification test for P5, retained.** Prototype at 4 players on the reference iPad. If castles stay readable and turns stay under ~10 seconds, 4 is safe. If not, make 2 the default with a 4-row castle. Run at the end of M2.
+3. **`ROUND_MAX` value.** Set to 12 as a safety net, with the match resolving on points if reached. With hearts now scaling down at 3-4 players, matches should end well before it. Time a real 4-player match at M2 and confirm; if matches routinely run past round 8, the hearts table is the dial, not `ROUND_MAX`.
 
 ## Success Criteria
 
@@ -508,6 +659,13 @@ Deliberately **not** persisted: match state, scores, player counts, slot configu
 - Pause, Settings and Home are all reachable mid-match, and a paused turn still ends correctly after resume.
 - After the launcher tile ships, an already-installed launcher picks it up without being reinstalled.
 - The battle poster prints **or saves** from the installed PWA.
+- `?selftest=1` reports 26/26 on the reference tablet.
+- Aiming is correct in portrait, i.e. pointer input is inverse-transformed through the letterbox.
+- No turn ends via `TURN_MAX_STEPS` under normal play; every turn ends because things stopped moving.
+- No projectile body survives into the next turn.
+- A living opponent whose castle is gone is still a valid CPU target.
+- With the CDN blocked on first load, the kid sees a retry card, not a blank screen.
+- After the launcher tile ships, an already-installed launcher shows it without reinstalling.
 
 **Kid-facing (§37, answered without adult explanation)**
 How do I start · Whose turn is it · How do I aim · How do I fire · When am I finished · Who gets the tablet next · What am I supposed to find · Who won.
@@ -523,8 +681,9 @@ Existing pipeline covers this. No new infrastructure.
 2. **`manifest.json` uses `"display": "standalone"`.** The other two apps differ (`crane-stacker` is `fullscreen`, `printables` is `standalone`); standalone is chosen here because M5 needs a print path and printing from a fullscreen installed PWA is less reliable.
 3. **`"orientation": "landscape"`** is set, but do not rely on it: iOS/WebKit implements neither the manifest `orientation` member nor `screen.orientation.lock()`, so on the reference device it is inert. It is correct and free on Android Chrome. What actually upholds P5's geometry on iPad is the letterboxed world plus the DOM HUD, which is why portrait is a tested case rather than "best-effort."
 4. **M1–M4 ship to `main` at the real path** `/castle-blasters/`, with **no launcher tile** (the tile lands in M4's final step). Not to Vercel preview URLs: every push mints a new preview origin, so each gets its own service worker registration, Cache Storage and `localStorage`, meaning the kid's installed app must be deleted and reinstalled on every iteration and loses its settings each time. Preview deployments can also sit behind Vercel Deployment Protection, which would block an unauthenticated iPad outright. Shipping unlinked to the real origin costs one line of scope and avoids all of it.
-5. Launcher tile added to `index.html` inside `<main id="apps">` at M4, pointing at `./castle-blasters/` with `./castle-blasters/icon-512.png`. Icon uses slot-2 golden yellow `#ffd700`. **The same commit must bump `CACHE_VERSION` in the ROOT `/service-worker.js`** (currently `kid-apps-launcher-v2.1`). That service worker is cache-first and precaches `./index.html`, so without the bump every installed launcher keeps serving the cached tile-less page forever and the new tile never appears on the kid's tablet — the exact failure the Constraints section warns about, applied to the one service worker it is easy to forget.
-6. Service worker scoped to `/castle-blasters/`, precaching the app shell plus the Matter.js and Google Fonts URLs. `CACHE_VERSION = 'castle-blasters-v1.0'`, bumped on every deploy without exception.
+5. Launcher tile added to `index.html` inside `<main id="apps">` at M4, pointing at `./castle-blasters/` with `./castle-blasters/icon-512.png`. Icon uses slot-2 golden yellow `#ffd700`. **The same commit must bump `CACHE_VERSION` in the ROOT `/service-worker.js`** (currently `kid-apps-launcher-v2.1`). *This is safe for the other two apps, verified:* `service-worker.js:51-54` returns early on any subdirectory request (`if (sameOrigin && /^\/[\w-]+\/(.+)?$/.test(url.pathname)) return;`), so the launcher cache cannot touch installed Crane Stacker or Printables clients. Blast radius is the launcher shell only. That service worker is cache-first and precaches `./index.html`, so without the bump every installed launcher keeps serving the cached tile-less page forever and the new tile never appears on the kid's tablet — the exact failure the Constraints section warns about, applied to the one service worker it is easy to forget.
+6. Service worker scoped to `/castle-blasters/`, precaching the app shell plus the Matter.js and Google Fonts URLs, using Crane Stacker's `addAll` / best-effort split (see Boot and failure paths). `CACHE_VERSION = 'castle-blasters-v1.0'`, bumped on every deploy without exception.
+   **Strategy is network-first through M3 and cache-first from M4.** Iterating against a cache-first SW means every push needs a version bump or the tablet serves the old build; that is correct for shipping and hostile while tuning feel. One constant changes at M4.
 7. **The poster needs a fallback specified now, not discovered at M5.** `window.print()` from an installed iOS home-screen web app has a long history of silently doing nothing. `printables/` is not evidence to the contrary: its own `CLAUDE.md` states under Known gaps that *"the print path has only been checked through the browser's print preview"* and has never been printed from an installed PWA. So M5 ships **print or save**: attempt `window.print()` on a print view, and always also offer the `canvas.toDataURL()` image in an `<img>` the parent can long-press to save, plus `navigator.share({ files: [...] })` where available.
 8. `vercel.json` already sets `Cache-Control: no-cache` on `/(.*)/service-worker.js` and `Service-Worker-Allowed: /`. No change needed.
 9. Verify a deploy with `curl -s https://apps.bryllelagunda.com/castle-blasters/service-worker.js | grep CACHE_VERSION` — the constant lives in the service worker, not in `index.html`.
@@ -539,15 +698,142 @@ Existing pipeline covers this. No new infrastructure.
 
 ## Next Steps
 
-1. Branch off `main`. This session ran on `bryllelagunda/gstack-upgrade`, which is unrelated to this work.
-2. Resolve Open Questions 1 and 2 (ground descriptor, character placement) — both are pre-M1.
-3. Run `/plan-eng-review` against this document to lock the architecture before any code.
-4. Build **M1**. Measure the frame budget, verify no tunnelling, hand the tablet to the kid. Do not proceed until the exit gate passes.
-5. Build **M2**, then run the P5 falsification test at 4 players on the reference iPad.
-6. Build **M3**, then **M4**.
-7. `/qa` the running game against the §36 checklist in `docs/designs/castle-blasters-source-spec.md`, fixing rather than documenting.
-8. Build **M5** (poster + docs), including `castle-blasters/CLAUDE.md` with the do-not-change list and the measured frame budget.
-9. Ship.
+**0. Land the docs on `main` first.** This is a real sequencing bug, not bookkeeping. The design doc, the wireframes and the source spec are committed on `bryllelagunda/gstack-upgrade`. Step 1 says branch off `main` — and `main` does not have them. Open a PR for `docs/` from this branch, merge it, *then* branch. Otherwise you branch off `main` and immediately do not have the plan you are building from, or the §-referenced spec that `/qa` needs at step 7.
+
+1. Branch off `main` (after step 0).
+2. Confirm the ground descriptor shape (Open Question 1). Character placement is **decided**, not open — see Character placement.
+3. Build **M1** with a network-first service worker. Measure the frame budget, verify no tunnelling at max power, run `?selftest=1` on the tablet, then hand it to the kid. Do not proceed until the exit gate passes.
+4. Build **M2**, then run the P5 falsification test at 4 players on the reference iPad, and re-verify `MAX_SPEED` against the chosen platform heights.
+5. Build **M3**, then **M4** (flip the SW to cache-first here, and land the launcher tile plus the root SW bump in the same commit).
+6. `/qa` the running game against the §36 checklist in `docs/designs/castle-blasters-source-spec.md`, plus the 21 integration paths in the test plan artifact. Fix rather than document.
+7. Build **M5** (poster + docs), including `castle-blasters/CLAUDE.md` with the do-not-change list and the measured frame budget.
+8. Ship.
+
+## NOT in scope
+
+Considered during review and explicitly deferred, each with the reason:
+
+| Deferred | Why |
+|---|---|
+| 8 weapon types (§11), special abilities (§12) | One projectile keeps the QA matrix flat; abilities multiply it immediately |
+| Team Battle, Castle Siege, Boss Battle, Learning Challenge (§22) | One mode polished beats five half-built (§39). Teams is also the answer to 5-8 players, so it is the first to come back |
+| 5-8 players | Screen geometry, not data modelling. Teams sharing castles is the path |
+| Ice blocks | Its only property was low friction, which mainly creates long roll-outs the turn cap then absorbs. It exists to create a problem |
+| Turn timer (§21) | Adds pressure a 4-year-old does not need; the soft-lock role it would have played is covered by `TURN_MAX_STEPS` |
+| Math questions, comparisons, difficulty tiers, badges, sticker economies, cosmetic unlocks (§14-17) | Crane Stacker and Printables already own this ground; §2.2 warns against quiz interruptions |
+| Castle-builder phase (Codex's idea) | A second full interaction mode, substantially redundant with Crane Stacker. Additive later because the castle is a plain descriptor |
+| Line-art conversion for the battle poster | Edge detection or outline re-render. v1 is a raw canvas screenshot |
+| CPU medium and hard tiers | Easy is the tier that gets played; the error bands are already config-shaped so adding them is a data change |
+| 4 character silhouettes | Two (kid, robot) carry the only distinction that means anything. The other two were art for art's sake |
+| ⭐ LEARNING STAR, 🎯 GREAT AIM, 🧱 WALL BREAKER awards | Four of seven awards can never all fire at ≤4 players, and two fired on zero-valued stats |
+| Automated browser test runner (vitest/playwright) | Structurally unavailable: workspace forbids a build step and npm. The `?selftest=1` harness plus `/qa` is the whole tests story |
+| Vercel preview deploys for M1-M3 | Every push mints a new origin, so the kid's installed app would need deleting and reinstalling each iteration, losing settings |
+
+## What already exists
+
+`crane-stacker/index.html` is closer to a template than a reference. Reused, not rebuilt:
+
+| Existing | Where | How this plan uses it |
+|---|---|---|
+| Matter.js bootstrap, canvas loop at `devicePixelRatio` | `crane-stacker/index.html` | Copied; **but** the variable `dt` at `:790,795` is explicitly not copied |
+| Off-screen culling | `:730` | Copied, extended with x-bounds |
+| Settle predicate shape (`restFrames`) | `:741-745` | Pattern borrowed, predicate rewritten (global + coarse + fixed step) |
+| TTS stack incl. `speechSynthesis.resume()` and the `rate=10` unlock utterance | `:300-310`, `:328` | Copied verbatim — these are the two fixes that took two versions to find |
+| Absence guards on speech APIs | `:277`, `:303` | Copied |
+| `localStorage` try/catch | `:389`; `printables/index.html:590,595` | Copied |
+| Service worker: `addAll` core + best-effort external, cache-first with runtime caching | `crane-stacker/service-worker.js:19-32,48-62` | Copied near-verbatim; change `CACHE_VERSION` and the URL list. Also what makes the gstatic fonts work offline |
+| Launcher SW subdirectory bail-out | `service-worker.js:51-54` | Not changed — it is why the M4 root bump is safe |
+| `_make_icons.py` | `crane-stacker/_make_icons.py` | Copied with a colour swap |
+| `vercel.json` SW cache headers | root | No change needed |
+| Safe-area insets, touch+mouse+keyboard on one surface | `crane-stacker/index.html` | Copied |
+
+**Rebuilt deliberately:** the turn/round system, CPU solver, aiming and preview, state machine, scoring and awards, and the learn module have no counterpart in the repo.
+
+## Failure modes
+
+For each new codepath: one realistic production failure, whether a test covers it, whether error handling exists, and whether the user would see it.
+
+| Codepath | Failure | Test | Handled | Visible to user? |
+|---|---|---|---|---|
+| Boot | CDN blocked, `window.Matter` undefined | selftest | Retry card | Yes, friendly |
+| Boot | Fonts never resolve | — | 2s timeout | Yes, draws anyway |
+| SW install | jsdelivr blip during `addAll` | — | Best-effort split | No, degrades to online-only |
+| `aim` | Pointer not inverse-transformed | `/qa` portrait | Single `toWorld()` | Yes, aiming visibly wrong |
+| `aim` | Stray tap fires and burns a turn | selftest | `MIN_DRAG` cancel | Yes, nothing happens |
+| `physics` | Projectile tunnels a block | `/qa` | Step rate + radius ratio | Yes, shot passes through |
+| `turns` | Projectile never removed → soft lock | selftest | 3 removal conditions | **Was silent. Now cannot happen** |
+| `turns` | One jittering block runs every turn to 12s | selftest | Coarse thresholds | **Was silent. Now cannot happen** |
+| `turns` | Pause mid-flight clears the input lock | `/qa` | `inputLocked` in-flight clause | Yes, double shot |
+| `cpu` | Opponent alive, castle gone → empty target list | selftest | Target the character | **Was a crash. Now handled** |
+| `learn` | No eligible labelled block for the mode | selftest | Label mix + skip | No, no target spawns |
+| `players` | Award on a zero stat | selftest | `>0` preconditions | Yes, absurd trophy |
+| `players` | CHAMPION ≠ winner on the same screen | selftest | CHAMPION is the winner | Yes, contradictory |
+| `store` | Safari private mode throws | — | try/catch | No, settings silently do not persist |
+| `audio` | TTS throws inside a turn prompt | — | Absence guards | No, silent |
+| M4 deploy | Launcher tile invisible on installed clients | — | Root SW bump | **Was permanent. Now handled** |
+
+**Critical gaps (no test AND no handling AND silent): 0.** Four were critical before this review: the un-removed projectile, the over-strict settle predicate, the empty CPU target list, and the missing root SW bump.
+
+## Parallelization
+
+Sequential implementation, no parallelization opportunity. All five milestones touch the same single `index.html`, so worktree isolation would produce guaranteed conflicts. The only genuinely independent workstream is icon generation (`_make_icons.py` + four PNGs), which is one command and not worth a lane.
+
+## Implementation Tasks
+
+Synthesized from this review's findings. Each derives from a specific finding above.
+
+- [ ] **T1 (P1, human: ~15min / CC: ~2min)** — repo — Land `docs/` on `main` before branching
+  - Surfaced by: Outside voice #1 — build branch would not contain the plan it builds from
+  - Files: PR from `bryllelagunda/gstack-upgrade`
+  - Verify: `git log origin/main --oneline -- docs/designs/` shows the doc
+- [ ] **T2 (P1, human: ~30min / CC: ~5min)** — `aim` — Single `toWorld()` inverse transform for all pointer input
+  - Surfaced by: Outside voice #3 — render transform specified, inverse never was
+  - Files: `castle-blasters/index.html`
+  - Verify: `?selftest=1` plus aim correctly in portrait on the tablet
+- [ ] **T3 (P1, human: ~20min / CC: ~3min)** — `turns` — Remove the projectile as a turn-end precondition
+  - Surfaced by: Outside voice #6 — resting projectile blocks settle, collides next turn, holds `inputLocked`
+  - Files: `castle-blasters/index.html`
+  - Verify: selftest — turn cannot end with a projectile body present
+- [ ] **T4 (P1, human: ~30min / CC: ~5min)** — `turns` — Coarse settle thresholds + quiet-after-impact window
+  - Surfaced by: Outside voice #7 — fine thresholds with sleeping off run every turn to the 12s cap
+  - Files: `castle-blasters/index.html`
+  - Verify: 4-player match, no turn hits `TURN_MAX_STEPS` under normal play
+- [ ] **T5 (P1, human: ~1h / CC: ~10min)** — `boot` — Matter-missing retry card + 2s font timeout
+  - Surfaced by: Architecture A2 — blank canvas, no explanation, on a blocked CDN
+  - Files: `castle-blasters/index.html`
+  - Verify: DevTools offline on first load → retry card, not a blue rectangle
+- [ ] **T6 (P1, human: ~3h / CC: ~25min)** — testing — `?selftest=1` harness, 26 assertions
+  - Surfaced by: Test review — 0/47 paths covered, no infrastructure in the repo
+  - Files: `castle-blasters/index.html`
+  - Verify: `?selftest=1` prints 26/26 on the tablet
+- [ ] **T7 (P2, human: ~10min / CC: ~2min)** — architecture — State the module layering rule in code comments
+  - Surfaced by: Architecture A1 — 13 modules, no stated call direction
+  - Files: `castle-blasters/index.html` header comment
+  - Verify: only `turns` contains `setState(`
+- [ ] **T8 (P2, human: ~15min / CC: ~3min)** — `render`/`aim` — Arc recompute per rAF + x-range broadphase
+  - Surfaced by: Performance P1 — ~15k intersection tests per pointermove
+  - Files: `castle-blasters/index.html`
+  - Verify: frame time flat while dragging at full power on the tablet
+- [ ] **T9 (P2, human: ~15min / CC: ~3min)** — `turns` — Live `dynamicBodies` array, settle check at 60Hz
+  - Surfaced by: Performance P2 — two array allocations 180× a second
+  - Files: `castle-blasters/index.html`
+  - Verify: no per-frame allocation in a DevTools memory profile
+- [ ] **T10 (P2, human: ~20min / CC: ~4min)** — `world` — Castle centres from the formula, not the table
+  - Surfaced by: Code quality C1 — DRY; makes P5's "range is data" claim true
+  - Files: `castle-blasters/index.html`
+  - Verify: selftest — centres for n=2,3,4 match `WORLD_W × (i+0.5)/n`
+- [ ] **T11 (P2, human: ~20min / CC: ~4min)** — `cpu`/`learn` — Stricter "standing" + destroyed-castle fallbacks
+  - Surfaced by: Outside voice #8, #9 — flat rubble counted as cover; empty target list
+  - Files: `castle-blasters/index.html`
+  - Verify: selftest — CPU targets the character when a living opponent has no standing blocks
+- [ ] **T12 (P2, human: ~10min / CC: ~2min)** — `players` — Hearts table scales with player count
+  - Surfaced by: Outside voice #13 — 15-minute worst-case match for a 4-year-old
+  - Files: `castle-blasters/index.html`
+  - Verify: time a real 4-player match at M2
+- [ ] **T13 (P3, human: ~10min / CC: ~2min)** — `audio`/`store` — Absence guards and storage try/catch
+  - Surfaced by: Code quality C3, C4 — house pattern exists in both sibling apps, plan omitted it
+  - Files: `castle-blasters/index.html`
+  - Verify: Safari private mode, settings change does not throw
 
 ## Reviewer Concerns
 
@@ -578,9 +864,44 @@ This document went through two adversarial review passes. Everything raised was 
 - `TURN_MAX_MS` was wall-clock, which would have expired during a pause into a state transition the table forbids.
 - Adding the launcher tile needs a bump to the **root** service worker, which no part of the plan mentioned.
 
+**Eng review (2026-08-23) — nine review findings plus fourteen from the outside voice:**
+- No stated call direction between the 13 modules. Layering rule added; only `turns` calls `setState()`.
+- Castle centres were a formula written out as a table. Now the formula, with the table as the worked example.
+- `CONFIG` was claimed to be one block while the tunables lived across eight sections. Consolidated block added.
+- Pointer input was never inverse-transformed through the letterbox scale — correct on a 4:3 tablet, completely broken in portrait, which Success Criteria calls a tested case.
+- The projectile was never removed at turn end: it blocked the settle predicate, collided next turn, and could hold `inputLocked` shut.
+- The settle predicate demanded near-perfect stillness from ~60 bodies with sleeping off, which would have run almost every turn to the 12-second cap.
+- `MAX_SPEED` was derived on flat ground before stepped platforms existed. Re-derived with an 80 px height bound; 18 survives with ~17% headroom.
+- "Standing" counted a block lying flat on the ground inside its own slice as cover.
+- CPU and `learn` had no fallback when a living opponent's castle was gone.
+- Friendly-fire hearts were undefined. Self-hits damage.
+- Character placement was an open question when it is architectural. Decided: on top of the castle.
+- Match duration had no boredom protection. Hearts now scale with player count.
+- Docs live on a branch `main` does not have, so "branch off main" would have left the build without its own plan.
+- Rejected after verification: the claim that Google Fonts would break offline. `crane-stacker/service-worker.js:48-62` is cache-first with runtime caching, so gstatic files are cached after the first online load.
+
 ## What I noticed about how you think
 
 - You wrote "no i want all computer opponent for 1 player or vs playera" and that one line was better architecture than the option I had just spent three paragraphs building. I offered solo-first-then-multiplayer as a *sequence*. You collapsed it into a *property of a player slot*. That is the more elegant answer and it took you one sentence.
 - "This is offline.." with the two dots reads like you were restating something you thought should already be obvious. And it is: no app in this repo makes a gameplay network call, and both service workers exist precisely so the CDN fetch happens once and never again. You have a hard constraint you no longer bother to justify, and it is why this codebase has stayed coherent across three apps.
 - You said you wanted this "covered upto deployment and get ready for my next step design eng review" before we had discussed a single game mechanic. You were scoping the *session*, not the game. Most people arrive with an idea. You arrived with a pipeline stage.
 - You accepted a cut of roughly five sixths of the educational layer without arguing for any of it, on a spec you commissioned yourself. Being unattached to your own document is rarer than it sounds.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | — | — |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR | 23 issues, 0 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
+| Outside Voice | `/plan-eng-review` (auto) | Cross-model challenge | 1 | issues_found | 14 raised, 11 accepted, 1 partial, 1 rejected, 2 tensions resolved |
+
+**CODEX:** 14 findings. Accepted 11, including three the multi-section review missed entirely (pointer input never inverse-transformed through the letterbox; the projectile never removed at turn end; the settle predicate demanding near-perfect stillness from ~60 bodies with sleeping off). One partial (aiming is already symmetric; only facing needs mirroring). One rejected after verification against `crane-stacker/service-worker.js:48-62` — runtime caching already covers the gstatic fonts offline.
+
+**CROSS-MODEL:** Two tensions, both resolved by the user. T1 (M1's PWA machinery): resolved with a third option neither model proposed — ship manifest and SW at M1 but network-first through M3, flip to cache-first at M4. T2 (match duration): accepted, hearts now scale with player count. Elsewhere the two reviews were complementary rather than contradictory — Claude found structure and performance issues, Codex found sequencing and lifecycle gaps.
+
+**VERDICT:** ENG CLEARED — ready to implement. 13 implementation tasks (6× P1, 6× P2, 1× P3). Test coverage is 0/47 today; the `?selftest=1` harness covers 26 and `/qa` covers the remaining 21 integration paths. 4 critical gaps were closed by this review: the un-removed projectile, the over-strict settle predicate, the empty CPU target list, and the missing root service-worker bump.
+
+NO UNRESOLVED DECISIONS
