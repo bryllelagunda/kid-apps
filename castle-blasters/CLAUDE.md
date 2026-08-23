@@ -460,6 +460,23 @@ python3 does. Regenerate with `python3 castle-blasters/_make_icons.py`.
   awards, parent settings, `localStorage`), M4 (bonus targets, TTS, confetti,
   awards, launcher tile, SW → cache-first), M5 (poster + docs). Each has an
   exit gate in the plan. Do not skip them.
+
+- **M3 MUST make the `ROUND_MAX` ending legible.** Found and reproduced at M2:
+  when a match reaches `ROUND_MAX` with more than one player still standing,
+  the win resolves on points — and at M2 the score is never displayed, so
+  `FINAL_RESULTS` reads
+
+      WINNER
+      (2)  PLAYER 2
+
+  with both players alive on full hearts and nothing on screen explaining why.
+  To a 4-year-old the game simply stopped and picked someone. This is not a
+  bug in the win condition — points-as-tiebreak is the plan, and it resolved
+  correctly — it is a gap in the *screen*, and the screen is M3's. When M3
+  builds final results with rankings, the points ending needs to say it is a
+  points ending and show the numbers it was decided on. Lowering the frequency
+  (see the `HEARTS` note below) reduces how often anyone meets it; it does not
+  close it.
 - ~~At M2, re-verify `MAX_SPEED` against the chosen platform heights.~~ Done —
   `PLATFORM_DY = 60`, `MAX_SPEED = 18` holds with 18.5% headroom, recomputed
   from CONFIG in `?selftest=1`.
