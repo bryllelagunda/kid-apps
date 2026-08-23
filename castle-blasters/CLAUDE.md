@@ -561,11 +561,34 @@ Two readings, and the second is the one to carry to the iPad:
   soft lock, but it went the distance. 3 hearts at 2 players is the reason;
   3 and 4 players already drop to 2 and land at 4–6 rounds.
 
-**So the thing to watch on the iPad is a 2-player match, not a 4-player one.**
-If a real match with the kid routinely reaches round 10+, drop `HEARTS[2]`
-from 3 to 2 — one number, and it touches nothing else. Do not reach for
-`ROUND_MAX`: shortening the safety net does not make the game shorter, it just
-makes more matches end on the safety net.
+### The `HEARTS` dial does not do what the plan assumes — measured
+
+The plan says: *"if matches routinely run past round 8, the hearts table is the
+dial, not `ROUND_MAX`."* That was worth testing before believing, so it was
+tested — 2-player matches, shooter given ±10° of aim error, five trials per arm,
+everything else identical:
+
+| `HEARTS[2]` | rounds | median | past round 8 | ended on `ROUND_MAX` |
+|---|---|---|---|---|
+| **3** (current) | 2 / 7 / 9 / 8 / 7 | 7 | 1 / 5 | 0 / 5 |
+| 2 | 4 / 9 / 3 / 8 / 3 | 4 | 1 / 5 | 0 / 5 |
+
+**Dropping to 2 hearts moves the median (7 → 4) and leaves the tail exactly
+where it was (1 in 5 past round 8, in both arms).** The long games are not
+caused by the heart count. They are caused by variance in whether shots
+connect: once a character is toppled onto the ground it cannot fall any
+further, so its remaining hearts have to come from direct hits, and a run of
+misses stretches the match regardless of how many hearts are on the board.
+
+**So `HEARTS[2]` stays at 3.** Reducing it would make the typical match shorter
+without fixing the thing that was actually worrying — and a shorter typical
+match was never the goal. The median at 3 hearts is 7 rounds, inside the plan's
+own round-8 line, and no trial in either arm reached `ROUND_MAX`.
+
+If the kid's real matches do drag, the lever is **not** this table. The honest
+options are to accept `ROUND_MAX` as the backstop it was designed to be and
+make that ending legible at M3 (see *Not yet done*), or to change what takes
+the second and third hearts — which is a design change, not a constant.
 
 Also still outstanding from M1: the **tablet performance number**. Same
 device, same session — see the Measured performance budget section.
