@@ -1,0 +1,2189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Castle Blasters</title>
+
+<!-- PWA -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#ffd700">
+<link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Blasters">
+<meta name="mobile-web-app-capable" content="yes">
+
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Lilita+One&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy:  #1a2555;   /* letterbox bars — launcher background */
+    --gold:  #ffd700;   /* this game's permanent DESIGN.md slot-2 colour */
+    --ink:   #2a1a0a;
+    --cream: #fff8e7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    height: 100%; width: 100%; overflow: hidden;
+    background: var(--navy);
+    font-family: 'Fredoka', sans-serif;
+    user-select: none; -webkit-user-select: none; touch-action: none;
+  }
+  /* The canvas is full-bleed; the world is letterboxed *inside* it, so the
+     letterbox bars absorb the notch and no safe-area padding is needed here.
+     The DOM HUD (M3) is what will need env(safe-area-inset-*). */
+  #game {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    display: block; background: var(--navy); touch-action: none;
+  }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--navy); padding: 24px;
+  }
+  .overlay[hidden] { display: none; }
+
+  #splash { flex-direction: column; gap: 14px; }
+  #splash .title {
+    font-family: 'Lilita One', sans-serif; font-size: 44px;
+    color: var(--gold); letter-spacing: 2px; text-align: center;
+  }
+  #splash .dots { display: flex; gap: 10px; }
+  #splash .dots i {
+    width: 14px; height: 14px; border-radius: 50%; background: var(--cream);
+    animation: bob .9s ease-in-out infinite;
+  }
+  #splash .dots i:nth-child(2) { animation-delay: .15s; }
+  #splash .dots i:nth-child(3) { animation-delay: .3s; }
+  @keyframes bob { 0%,100% { transform: translateY(0); opacity:.5 } 50% { transform: translateY(-10px); opacity:1 } }
+
+  .card {
+    background: var(--cream); border: 6px solid var(--ink); border-radius: 26px;
+    box-shadow: 0 8px 0 var(--ink); padding: 28px 30px; max-width: 460px;
+    text-align: center; color: var(--ink);
+  }
+  .card h1 { font-family: 'Lilita One', sans-serif; font-size: 30px; margin-bottom: 6px; }
+  .card p  { font-size: 17px; font-weight: 500; margin-bottom: 20px; }
+  .card button {
+    font-family: 'Lilita One', sans-serif; font-size: 26px; letter-spacing: 1px;
+    padding: 16px 34px; border-radius: 22px; border: 5px solid var(--ink);
+    background: var(--gold); color: var(--ink); box-shadow: 0 6px 0 var(--ink);
+    cursor: pointer;
+  }
+  .card button:active { transform: translateY(3px); box-shadow: 0 3px 0 var(--ink); }
+
+  /* ?selftest=1 */
+  #selftest { align-items: flex-start; justify-content: flex-start; overflow: auto; background: #0d1330; }
+  #selftest .wrap { width: 100%; max-width: 780px; margin: 0 auto; color: var(--cream); font-size: 14px; }
+  #selftest h1 { font-family: 'Lilita One', sans-serif; font-size: 26px; margin-bottom: 4px; color: var(--gold); }
+  #st-score { font-size: 20px; font-weight: 700; margin-bottom: 14px; }
+  #st-score.pass { color: #43e6a5; }
+  #st-score.fail { color: #ff3b6b; }
+  #st-list { list-style: none; }
+  #st-list li { padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.1); display: flex; gap: 10px; }
+  #st-list li .tag { flex: 0 0 46px; font-weight: 700; }
+  #st-list li.ok  .tag { color: #43e6a5; }
+  #st-list li.bad .tag { color: #ff3b6b; }
+  #st-list li .grp { flex: 0 0 74px; opacity: .55; }
+  #st-list li .msg { flex: 1 1 auto; }
+  #st-list li .why { display: block; opacity: .7; font-size: 12px; }
+
+  /* ?perf=1 */
+  #perf {
+    position: fixed; top: 8px; left: 8px; z-index: 8;
+    background: rgba(13,19,48,.86); color: #cfe6ff; border: 2px solid #43e6a5;
+    border-radius: 10px; padding: 8px 10px; font: 12px/1.45 ui-monospace, Menlo, monospace;
+    white-space: pre; pointer-events: none;
+  }
+  #perf[hidden] { display: none; }
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<div class="overlay" id="splash">
+  <div class="title">CASTLE BLASTERS</div>
+  <div class="dots"><i></i><i></i><i></i></div>
+</div>
+
+<div class="overlay" id="retry" hidden>
+  <div class="card">
+    <h1>Let's try that again</h1>
+    <p>The game needs the internet just this once. Tap the big button.</p>
+    <button id="retry-btn" type="button">TRY AGAIN</button>
+  </div>
+</div>
+
+<div class="overlay" id="selftest" hidden>
+  <div class="wrap">
+    <h1>Castle Blasters — selftest</h1>
+    <div id="st-score">running…</div>
+    <ol id="st-list"></ol>
+  </div>
+</div>
+
+<div id="perf" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+<script>
+/* ==========================================================================
+   CASTLE BLASTERS — M1 (Feel)
+
+   Everything lives in this one file: no build step, no npm, no framework
+   (workspace CLAUDE.md). Matter.js arrives from the same jsdelivr URL the
+   other two apps already cache.
+
+   MODULE LAYERING — a hard rule, because nothing in a single-file IIFE
+   enforces it. Modules may only call DOWNWARD in this order:
+
+       CONFIG -> view -> state -> world / players / turns
+              -> physics -> audio -> render -> ui
+
+   Three consequences, stated so they are not quietly broken later:
+     * Only `turns` calls setState(). Every other module returns a value or
+       raises an intent. This is what stops a turn ending twice.
+     * `render` and `ui` never mutate game state, and `render` never
+       allocates per frame.
+     * `physics` never calls `ui` or `audio` directly. It records what
+       happened into a queue; `turns` drains it and decides what it means.
+
+   M1 SCOPE: canvas + fixed letterboxed world, ground from a descriptor, ONE
+   castle of wood blocks, one character on top of it, the slingshot gesture,
+   the live dotted arc, projectile flight, damage, block destruction, a
+   WebAudio boom, and the PLAYER_TURN <-> TURN_RESULT loop running one slot.
+
+   NOT M1: turns proper, opponents, CPU, scoring, HUD, setup, pass-device,
+   awards, bonus targets, TTS, stone blocks, the launcher tile.
+
+   Copied from crane-stacker/index.html: the Matter bootstrap, the canvas
+   loop at devicePixelRatio, off-screen culling, the localStorage try/catch
+   shape. NOT copied: the variable `dt` at crane-stacker/index.html:790,795.
+   That game passes a variable delta to Engine.update. This one must not —
+   see FIXED TIMESTEP below.
+   ========================================================================== */
+(() => {
+'use strict';
+
+/* ---------------------------------------------------------------- boot ---
+   Failure path 1: Matter.js missing (captive portal, blocked CDN, hotel
+   wifi). Without this the kid gets a blank navy rectangle and hands the
+   tablet back. bootCheck is pure so ?selftest=1 can assert the path.
+   ------------------------------------------------------------------------ */
+function bootCheck(g) { return (g && g.Matter) ? 'ok' : 'retry'; }
+
+const QS       = new URLSearchParams(location.search);
+const SELFTEST = QS.get('selftest') === '1';
+const PERF     = QS.get('perf') === '1';
+
+const $ = (id) => document.getElementById(id);
+
+if (bootCheck(window) === 'retry') {
+  $('splash').hidden = true;
+  $('retry').hidden = false;
+  $('retry-btn').addEventListener('click', () => location.reload());
+  return;
+}
+
+const { Engine, Bodies, Body, Composite, Events } = Matter;
+
+/* Matter normalises velocities against this. Body.setVelocity takes px per
+   BASE_DELTA ms regardless of the actual step size, which is what makes
+   every speed below step-independent. */
+const BASE_DELTA = 1000 / 60;
+
+/* =========================================================== CONFIG ======
+   Every tunable lives here. Nothing tunable lives inline.
+   (Entries M1 does not use yet — HEARTS, CPU, BONUS_CHANCE — are carried
+   verbatim from the approved plan so M2+ does not have to reopen this
+   block.)
+   ======================================================================== */
+const CONFIG = {
+  // world + timestep
+  WORLD_W: 1024, WORLD_H: 768,
+  STEP_MS: 16.666 / 3,            // 5.5555 — one rate, always
+  MAX_STEPS_PER_FRAME: 8,
+
+  // physics
+  GRAVITY_Y: 1, GRAVITY_SCALE: 0.001,   // Matter defaults, stated because all ballistics depend on them
+  BLOCK: { w: 40, h: 40, chamfer: 4, density: 0.004,
+           friction: 0.95, frictionStatic: 1.2, restitution: 0.05 },
+  PROJECTILE: { radius: 18, density: 0.008, friction: 0.4,
+                restitution: 0.2, frictionAir: 0 },
+  CHARACTER: { w: 36, h: 44, chamfer: 8, density: 0.003,
+               friction: 0.9, frictionStatic: 1.0, restitution: 0.05 },
+  MAT_HITS: { wood: 1, stone: 2 },
+  IMPACT_HIT: 60,
+
+  // aiming
+  MIN_DRAG: 28, MAX_DRAG: 220,
+  MIN_SPEED: 5, MAX_SPEED: 18, POWER_EXP: 1.35,
+  SPAWN_OFFSET_Y: 30, SPAWN_GRACE_STEPS: 3,
+  ARC_MAX_STEPS: 420, ARC_DOT_EVERY: 8,
+
+  // turn lifecycle
+  PROJECTILE_REST_V: 0.5, PROJECTILE_REST_STEPS: 10,
+  /* PROJECTILE_MAX_STEPS must never be below ARC_MAX_STEPS: the projectile
+     has to live at least as long as the arc that promised it, or the preview
+     draws a landing the ball never reaches.
+
+     M1 CORRECTION to the approved plan, which specified 300 here. That number
+     contradicts the plan's own derivation of ARC_MAX_STEPS = 420 ("a
+     near-vertical lob at MAX_SPEED takes about 389 steps") and it breaks the
+     Success Criterion "the drawn trajectory arc matches the actual flight
+     path along its whole length". Measured: a MAX_SPEED near-vertical lob
+     flies 400 steps, and at 300 it was deleted at y = 62, still 240 px above
+     the castle it was drawn landing on. That is the first shot a 4-year-old
+     fires — pull down, shoot straight up.
+     Derived, not picked. The longest flight the gesture can produce is
+     MAX_SPEED fired straight up from the HIGHEST possible launch point — the
+     top of a 4-row castle standing on the highest platform M2 may introduce
+     (PLATFORM_DY_MAX) — then a fall all the way to the bottom cull bound:
+
+       launch y = 700 - 80 - 4*40 - 44 - 30 = 386
+       rise     = 195 steps to an apex of y = -197
+       fall     = 275 steps from -197 down to the cull bound at y = 968
+       total    ~ 470 steps
+
+     600 gives ~28% headroom and is 3.33 s of simulated time, still far inside
+     TURN_MAX_STEPS (2160). This restores the cap to what the plan intended —
+     a backstop against a ball that never settles — instead of something that
+     fires on an ordinary shot. ?selftest=1 recomputes the worst case from
+     CONFIG and fails if this stops covering it. */
+  PROJECTILE_MAX_STEPS: 600,
+  SETTLE_V: 1.2, SETTLE_W: 0.08, SETTLE_STEPS: 20, QUIET_AFTER_IMPACT_STEPS: 30,
+  TURN_MAX_STEPS: 2160,           // 12s of simulated time
+  TURN_RESULT_STEPS: 90,          // M1 addition: 0.5s beat on TURN_RESULT before the next turn
+
+  // match
+  HEARTS: { 2: 3, 3: 2, 4: 2 },   // scales with player count (M2)
+  ROUND_MAX: 12,
+  PLATFORM_DY_MAX: 80,            // bounds the MAX_SPEED derivation
+
+  // cpu (M2; v1 ships easy only)
+  CPU: { angleErrDeg: 12, powerJitter: 0.08,
+         sillyShotChance: 0.12, thinkMs: 700 },
+
+  // learning (M4)
+  BONUS_CHANCE: 0.5,
+  LABEL_MIX: { 9: { letters: 5, numbers: 4 }, 12: { letters: 7, numbers: 5 } },
+
+  // ui
+  BUTTON_DEBOUNCE_MS: 400, FONT_TIMEOUT_MS: 2000,
+
+  // cull bounds (bodies). The arc uses the same box MINUS the top edge —
+  // a near-vertical shot legitimately climbs to about y = -43 and comes back,
+  // and truncating the preview at y = 0 would draw a lie.
+  CULL: { minX: -200, maxX: 1024 + 200, maxY: 768 + 200, minY: -300 },
+
+  // M1 affordance: how long the player may sit idle in PLAYER_TURN before
+  // the canvas draws a pull-back hint. Not a HUD — an in-world nudge, so the
+  // 4-year-old can find the gesture without being told.
+  HINT_IDLE_MS: 4000,
+
+  // palette
+  COLOR: {
+    sky0: '#8fd8ff', sky1: '#d9f2ff',
+    dirt: '#6b3f1f', grass: '#4caf50',
+    wood: '#d9a05b', stone: '#b8b8b8',
+    ink: '#2a1a0a', cream: '#fff8e7', gold: '#ffd700',
+    ball: '#4a4a52',
+    players: ['#2eb8ff', '#43e6a5', '#a86bff', '#f97316'],
+  },
+};
+
+/* ============================================================ view =======
+   ONE fixed world, no camera, no scrolling. The renderer computes a single
+   uniform scale, centres the world and letterboxes the remainder.
+
+   Pointer input MUST be inverse-transformed through the same scale and
+   offset. There is exactly one toWorld() and every pointer handler goes
+   through it. Raw client coordinates look correct on a 4:3 tablet in
+   landscape (the bars are zero px wide there) and are completely broken in
+   portrait, which is a tested case.
+   ======================================================================== */
+const view = {
+  canvas: $('game'),
+  ctx: null,
+  dpr: 1, scale: 1, offX: 0, offY: 0, cssW: 0, cssH: 0,
+
+  init() {
+    this.ctx = this.canvas.getContext('2d', { alpha: false });
+    this.resize();
+  },
+
+  resize() {
+    const w = this.canvas.clientWidth || window.innerWidth;
+    const h = this.canvas.clientHeight || window.innerHeight;
+    this.cssW = w; this.cssH = h;
+    this.dpr = Math.min(window.devicePixelRatio || 1, 3);
+    this.canvas.width  = Math.max(1, Math.round(w * this.dpr));
+    this.canvas.height = Math.max(1, Math.round(h * this.dpr));
+    this.scale = Math.min(w / CONFIG.WORLD_W, h / CONFIG.WORLD_H);
+    this.offX = (w - CONFIG.WORLD_W * this.scale) / 2;
+    this.offY = (h - CONFIG.WORLD_H * this.scale) / 2;
+    render.invalidate();
+  },
+
+  /* The single inverse transform. Nothing else may convert pointer coords. */
+  toWorld(clientX, clientY) {
+    const r = this.canvas.getBoundingClientRect();
+    return {
+      x: (clientX - r.left - this.offX) / this.scale,
+      y: (clientY - r.top  - this.offY) / this.scale,
+    };
+  },
+
+  /* Pure, so the selftest can exercise it without a real canvas. */
+  static_toWorld(clientX, clientY, rectLeft, rectTop, offX, offY, scale) {
+    return { x: (clientX - rectLeft - offX) / scale, y: (clientY - rectTop - offY) / scale };
+  },
+};
+
+/* =========================================================== state =======
+   Exactly one curState. Every transition goes through turns.setState().
+   M1 runs the PLAYER_TURN <-> TURN_RESULT half of the machine, on one slot.
+   Without that loop the input lock never clears and the player gets exactly
+   one shot ever.
+   ======================================================================== */
+const STATES = {
+  HOME: 'HOME', PLAYER_SETUP: 'PLAYER_SETUP', ROUND_INTRO: 'ROUND_INTRO',
+  PLAYER_TURN: 'PLAYER_TURN', TURN_RESULT: 'TURN_RESULT', PASS_DEVICE: 'PASS_DEVICE',
+  ROUND_COMPLETE: 'ROUND_COMPLETE', FINAL_RESULTS: 'FINAL_RESULTS', PAUSED: 'PAUSED',
+};
+
+const state = {
+  curState: null,
+  /* One flag, owned by the state machine. Every pointer handler returns
+     early when it is set. There is no second in-flight guard. */
+  inputLocked: true,
+};
+
+/* ========================================================= players =======
+   M1 populates one slot. The shape is the full v1 slot so nothing has to be
+   retrofitted at M2.
+   ======================================================================== */
+const players = {
+  list: [],
+
+  reset(n) {
+    this.list.length = 0;
+    for (let i = 0; i < n; i++) {
+      this.list.push({
+        id: i + 1, name: 'PLAYER ' + (i + 1), kind: 'human',
+        characterId: 'nim', color: CONFIG.COLOR.players[i], castleId: i,
+        hearts: (CONFIG.HEARTS[n] || 3), alive: true, score: 0,
+        stats: { bestShotDamage: 0, selfHits: 0 },
+      });
+    }
+    return this.list;
+  },
+
+  living() { return this.list.filter(p => p.alive); },
+};
+
+/* =========================================================== world =======
+   Ground and castles are plain descriptors. That is what lets M1's power
+   curve survive stepped platforms at M2, and makes a future builder phase
+   additive rather than a rewrite.
+
+   Coordinate convention: +y is DOWN, everywhere, matching Matter.
+   ======================================================================== */
+const world = {
+  /* Ground: x, y are the LEFT and TOP edges. M1 is deliberately flat —
+     stepped platforms land at M2, and the MAX_SPEED derivation is only
+     valid while PLATFORM_DY_MAX <= 80. */
+  groundPlan: [{ x: 0, y: 700, w: 1024, h: 68 }],
+
+  /* Castle centres are a FORMULA, not a table. Adding a fifth slot is then a
+     config change instead of arithmetic someone has to redo. */
+  castleCentres(n) {
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(CONFIG.WORLD_W * (i + 0.5) / n);
+    return out;
+  },
+
+  /* The active player's activation region: their whole vertical slice. Not a
+     radius around the character — a 4-year-old will not hit a small hotspot. */
+  slice(n, i) {
+    const w = CONFIG.WORLD_W / n;
+    return { x0: w * i, x1: w * (i + 1) };
+  },
+
+  /* Fixed letter/number mix, positions shuffled per match. Not cosmetic: it
+     guarantees both `letters` and `numbers` mode always find an eligible
+     block on every castle, which random labelling does not. */
+  mixFor(count) {
+    const m = CONFIG.LABEL_MIX[count];
+    if (m) return m;
+    // Fallback for the ?perf=1 stress castle only; repeats are allowed there.
+    const letters = Math.round(count * 5 / 9);
+    return { letters, numbers: count - letters, repeats: true };
+  },
+
+  makeLabels(count, rnd) {
+    rnd = rnd || Math.random;
+    const mix = this.mixFor(count);
+    const L = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const D = '0123456789'.split('');
+    const take = (pool, k) => {
+      const src = shuffle(pool.slice(), rnd);
+      if (!mix.repeats) return src.slice(0, k);
+      const out = [];
+      for (let i = 0; i < k; i++) out.push(src[i % src.length]);
+      return out;
+    };
+    return shuffle(take(L, mix.letters).concat(take(D, mix.numbers)), rnd);
+  },
+
+  /* Block descriptors. gx = column (0 = leftmost), gy = row (0 = bottom).
+       worldX = castleBaseX + (gx + 0.5) * BLOCK_W
+       worldY = platformTopY - (gy + 0.5) * BLOCK_H                          */
+  makeCastlePlan(cols, rows, rnd) {
+    const count = cols * rows;
+    const labels = this.makeLabels(count, rnd);
+    const out = [];
+    let k = 0;
+    for (let gy = 0; gy < rows; gy++) {
+      for (let gx = 0; gx < cols; gx++) {
+        out.push({ gx, gy, mat: 'wood', label: labels[k++] });  // stone lands at M2
+      }
+    }
+    return out;
+  },
+
+  blockWorldX(baseLeftX, gx) { return baseLeftX + (gx + 0.5) * CONFIG.BLOCK.w; },
+  blockWorldY(platformTopY, gy) { return platformTopY - (gy + 0.5) * CONFIG.BLOCK.h; },
+};
+
+function shuffle(a, rnd) {
+  rnd = rnd || Math.random;
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const t = a[i]; a[i] = a[j]; a[j] = t;
+  }
+  return a;
+}
+
+/* ========================================================= physics =======
+   Records what happened into `queue`. `turns` drains it and decides what it
+   means. physics never calls audio or ui.
+   ======================================================================== */
+const physics = {
+  engine: null, mworld: null,
+  dynamicBodies: [],      // live array, maintained on add/remove — NOT rebuilt
+                          // per call. Composite.allBodies().filter() at 180 Hz
+                          // is ~360 throwaway arrays a second on a tablet.
+  blocks: [],             // { body, hp, maxHp, mat, label, castleId, gx, gy }
+  characters: [],         // { body, playerId, castleId, facing }
+  castles: [],            // { id, centreX, baseLeftX, platformTopY, cols, rows }
+  ground: [],
+  projectile: null,       // Matter body or null
+  projRest: 0, projAge: 0,
+  stepCount: 0,
+  lastImpactStep: -1e9,
+  queue: [],              // drained by turns each frame
+  indexDirty: true,
+
+  // ?perf=1 tunnelling detector
+  crossedIds: null, hitIds: null, tunnelEvents: 0, maxStepDisp: 0,
+
+  create() {
+    this.engine = Engine.create({ enableSleeping: false });
+    /* Sleeping stays OFF. enableSleeping: true would be a bug here, not an
+       optimisation: Sleeping.afterCollisions skips any pair containing a
+       static body, and removing a supporting block generates no collision
+       event at all — so the block above is never woken and hangs in mid-air,
+       which destroys the one thing this product is for. */
+    this.engine.gravity.y = CONFIG.GRAVITY_Y;
+    this.engine.gravity.scale = CONFIG.GRAVITY_SCALE;
+    this.mworld = this.engine.world;
+
+    Events.on(this.engine, 'collisionStart', (ev) => this.onCollisionStart(ev));
+  },
+
+  addDynamic(body) {
+    Composite.add(this.mworld, body);
+    this.dynamicBodies.push(body);
+    this.indexDirty = true;
+  },
+
+  removeDynamic(body) {
+    Composite.remove(this.mworld, body);
+    const i = this.dynamicBodies.indexOf(body);
+    if (i >= 0) this.dynamicBodies.splice(i, 1);
+    this.indexDirty = true;
+  },
+
+  /* --- build ---------------------------------------------------------- */
+  build(playerCount, opts) {
+    opts = opts || {};
+    const cols = opts.cols || 3;
+    const rows = opts.rows || 4;
+
+    // wipe
+    Composite.clear(this.mworld, false, true);
+    this.dynamicBodies.length = 0;
+    this.blocks.length = 0;
+    this.characters.length = 0;
+    this.castles.length = 0;
+    this.ground.length = 0;
+    this.projectile = null;
+    this.queue.length = 0;
+    this.indexDirty = true;
+
+    // ground from the descriptor (Bodies.rectangle takes a CENTRE)
+    for (const g of world.groundPlan) {
+      const b = Bodies.rectangle(g.x + g.w / 2, g.y + g.h / 2, g.w, g.h, {
+        isStatic: true, label: 'ground', friction: 0.9,
+      });
+      b.plan = g;
+      Composite.add(this.mworld, b);
+      this.ground.push(b);
+    }
+    const platformTopY = world.groundPlan[0].y;
+
+    const centres = world.castleCentres(playerCount);
+    for (let ci = 0; ci < centres.length; ci++) {
+      const centreX = centres[ci];
+      const baseLeftX = centreX - (cols * CONFIG.BLOCK.w) / 2;
+      const castle = { id: ci, centreX, baseLeftX, platformTopY, cols, rows };
+      this.castles.push(castle);
+
+      for (const d of world.makeCastlePlan(cols, rows)) {
+        const body = Bodies.rectangle(
+          world.blockWorldX(baseLeftX, d.gx),
+          world.blockWorldY(platformTopY, d.gy),
+          CONFIG.BLOCK.w, CONFIG.BLOCK.h, {
+            label: 'block', chamfer: { radius: CONFIG.BLOCK.chamfer },
+            density: CONFIG.BLOCK.density, friction: CONFIG.BLOCK.friction,
+            frictionStatic: CONFIG.BLOCK.frictionStatic,
+            restitution: CONFIG.BLOCK.restitution,
+          });
+        const rec = {
+          body, mat: d.mat, label: d.label, castleId: ci, gx: d.gx, gy: d.gy,
+          hp: CONFIG.MAT_HITS[d.mat], maxHp: CONFIG.MAT_HITS[d.mat],
+        };
+        body.brick = rec;
+        this.blocks.push(rec);
+        this.addDynamic(body);
+      }
+
+      /* The character stands on TOP of its own castle. This sets the launch
+         origin, the fall check and the spawn-collision grace, and it is why
+         "you lose when your guy falls" is literally true. It is DYNAMIC
+         specifically so it can be toppled. */
+      const topY = platformTopY - rows * CONFIG.BLOCK.h;
+      const ch = Bodies.rectangle(centreX, topY - CONFIG.CHARACTER.h / 2 - 1,
+        CONFIG.CHARACTER.w, CONFIG.CHARACTER.h, {
+          label: 'character', chamfer: { radius: CONFIG.CHARACTER.chamfer },
+          density: CONFIG.CHARACTER.density, friction: CONFIG.CHARACTER.friction,
+          frictionStatic: CONFIG.CHARACTER.frictionStatic,
+          restitution: CONFIG.CHARACTER.restitution,
+        });
+      const chRec = { body: ch, playerId: ci + 1, castleId: ci, facing: 1 };
+      ch.charRec = chRec;
+      this.characters.push(chRec);
+      this.addDynamic(ch);
+    }
+  },
+
+  castleOf(id) { return this.castles[id]; },
+  blocksOf(id) { return this.blocks.filter(b => b.castleId === id); },
+
+  /* --- projectile ------------------------------------------------------ */
+  spawnProjectile(x, y, vx, vy) {
+    const p = Bodies.circle(x, y, CONFIG.PROJECTILE.radius, {
+      label: 'projectile', density: CONFIG.PROJECTILE.density,
+      friction: CONFIG.PROJECTILE.friction,
+      restitution: CONFIG.PROJECTILE.restitution,
+      /* frictionAir 0 is load-bearing: any non-zero value makes the path
+         non-parabolic AND step-rate-dependent, so the dotted preview would
+         stop matching the flight. */
+      frictionAir: CONFIG.PROJECTILE.frictionAir,
+    });
+    /* Collides with nothing for SPAWN_GRACE_STEPS, so a low-power shot
+       cannot detonate on the shooter's own parapet at the moment of launch. */
+    p.collisionFilter.mask = 0;
+    p.graceLeft = CONFIG.SPAWN_GRACE_STEPS;
+    this.addDynamic(p);
+    Body.setVelocity(p, { x: vx, y: vy });
+    this.projectile = p;
+    this.projRest = 0;
+    this.projAge = 0;
+    if (PERF) {
+      this.crossedIds = new Set();
+      this.hitIds = new Set();
+      this.maxStepDisp = 0;
+    }
+    return p;
+  },
+
+  removeProjectile() {
+    if (!this.projectile) return;
+    if (PERF && this.crossedIds) {
+      for (const id of this.crossedIds) if (!this.hitIds.has(id)) this.tunnelEvents++;
+    }
+    this.removeDynamic(this.projectile);
+    this.projectile = null;
+  },
+
+  /* --- collisions ------------------------------------------------------ */
+  onCollisionStart(ev) {
+    const proj = this.projectile;
+    if (!proj) return;
+    for (const pair of ev.pairs) {
+      let other = null;
+      if (pair.bodyA === proj) other = pair.bodyB;
+      else if (pair.bodyB === proj) other = pair.bodyA;
+      else continue;
+
+      /* impact = |relative normal velocity| * projectile mass.
+         pair.contacts[].normalImpulse is NOT usable: it is only meaningful
+         after the velocity solver runs and is scaled by the solver's
+         internal delta. */
+      const pv = Body.getVelocity(proj);
+      const ov = other.isStatic ? ZERO : Body.getVelocity(other);
+      const n = pair.collision ? pair.collision.normal : { x: 0, y: 1 };
+      const relN = Math.abs((pv.x - ov.x) * n.x + (pv.y - ov.y) * n.y);
+      const impact = relN * proj.mass;
+
+      if (PERF && other.label === 'block') this.hitIds.add(other.id);
+
+      if (other.label === 'block' && impact >= CONFIG.IMPACT_HIT) {
+        const rec = other.brick;
+        rec.hp -= 1;
+        this.lastImpactStep = this.stepCount;
+        this.queue.push({ type: 'blockHit', impact, rec, destroyed: rec.hp <= 0 });
+        if (rec.hp <= 0) this.destroyBlock(rec);
+      } else if (other.label === 'character' && impact >= CONFIG.IMPACT_HIT) {
+        this.lastImpactStep = this.stepCount;
+        this.queue.push({ type: 'charHit', impact, rec: other.charRec });
+      } else {
+        this.queue.push({ type: 'tap', impact });
+      }
+    }
+  },
+
+  destroyBlock(rec) {
+    const i = this.blocks.indexOf(rec);
+    if (i >= 0) this.blocks.splice(i, 1);
+    this.removeDynamic(rec.body);
+    rec.destroyedAt = this.stepCount;
+  },
+
+  /* --- per-step -------------------------------------------------------- */
+  outOfBounds(x, y) {
+    const c = CONFIG.CULL;
+    return x < c.minX || x > c.maxX || y > c.maxY || y < c.minY;
+  },
+
+  afterStep() {
+    this.stepCount++;
+
+    const p = this.projectile;
+    if (p) {
+      if (p.graceLeft > 0 && --p.graceLeft === 0) p.collisionFilter.mask = 0xFFFFFFFF;
+
+      if (PERF) {
+        const dx = p.position.x - p.positionPrev.x, dy = p.position.y - p.positionPrev.y;
+        const d = Math.hypot(dx, dy);
+        if (d > this.maxStepDisp) this.maxStepDisp = d;
+        // If the projectile CENTRE crossed a block's AABB in one step, an
+        // overlap definitely occurred — so a missing collision is a tunnel.
+        for (const rec of this.blocks) {
+          if (segmentHitsAABB(p.positionPrev.x, p.positionPrev.y, p.position.x, p.position.y, rec.body.bounds)) {
+            this.crossedIds.add(rec.body.id);
+          }
+        }
+      }
+
+      this.projAge++;
+      const ts = BASE_DELTA / p.deltaTime;
+      const vx = (p.position.x - p.positionPrev.x) * ts;
+      const vy = (p.position.y - p.positionPrev.y) * ts;
+      if (Math.hypot(vx, vy) < CONFIG.PROJECTILE_REST_V) this.projRest++; else this.projRest = 0;
+
+      /* Three removal conditions. Mandatory, not tidiness: a projectile that
+         comes to rest and is never removed stays a dynamic body forever — it
+         blocks the settle predicate, it collides on somebody else's turn,
+         and it holds inputLocked shut. */
+      if (this.projRest >= CONFIG.PROJECTILE_REST_STEPS ||
+          this.projAge >= CONFIG.PROJECTILE_MAX_STEPS ||
+          this.outOfBounds(p.position.x, p.position.y)) {
+        this.removeProjectile();
+      }
+    }
+
+    // Cull. crane-stacker/index.html:730 is vertical-only; the horizontal
+    // bounds are added because a near-flat max-power shot exits sideways.
+    for (let i = this.dynamicBodies.length - 1; i >= 0; i--) {
+      const b = this.dynamicBodies[i];
+      if (b === this.projectile) continue;
+      if (this.outOfBounds(b.position.x, b.position.y)) {
+        if (b.label === 'block') {
+          const rec = b.brick;
+          const k = this.blocks.indexOf(rec);
+          if (k >= 0) this.blocks.splice(k, 1);
+        }
+        if (b.label === 'character') this.queue.push({ type: 'charCulled', rec: b.charRec });
+        this.removeDynamic(b);
+      }
+    }
+  },
+
+  /* Coarse calm. "Is anything still meaningfully moving?", not "is
+     everything perfectly still?". At 40 px blocks, motion below these
+     thresholds is invisible. Fine thresholds (|v|<0.2 / |w|<0.02) with
+     sleeping off would run almost every turn to the 12-second cap, because
+     one block jittering anywhere blocks the predicate. Zero-allocation on
+     purpose: this runs once per rendered frame over ~60 bodies. */
+  worldIsCalm() {
+    const bs = this.dynamicBodies;
+    for (let i = 0; i < bs.length; i++) {
+      const b = bs[i];
+      const ts = BASE_DELTA / b.deltaTime;
+      const vx = (b.position.x - b.positionPrev.x) * ts;
+      const vy = (b.position.y - b.positionPrev.y) * ts;
+      if (vx * vx + vy * vy >= CONFIG.SETTLE_V * CONFIG.SETTLE_V) return false;
+      if (Math.abs(b.angle - b.anglePrev) * ts >= CONFIG.SETTLE_W) return false;
+    }
+    return true;
+  },
+
+  forceQuiet() {
+    this.removeProjectile();
+    for (const b of this.dynamicBodies) {
+      Body.setVelocity(b, ZERO);
+      Body.setAngularVelocity(b, 0);
+    }
+  },
+
+  /* Highest surface of what remains of a castle, used to re-stand a fallen
+     character. Falls back to the bare platform when the castle is gone. */
+  standingTopY(castleId) {
+    const cas = this.castles[castleId];
+    let top = cas.platformTopY;
+    for (const rec of this.blocks) {
+      if (rec.castleId !== castleId) continue;
+      const b = rec.body;
+      if (Math.abs(b.position.x - cas.centreX) > CONFIG.BLOCK.w) continue;
+      if (b.bounds.min.y < top) top = b.bounds.min.y;
+    }
+    return top;
+  },
+
+  /* --- arc broadphase index -------------------------------------------
+     O(1) candidate lookup per arc point. Naively, 420 steps against every
+     block is thousands of bounds tests per frame while a finger is moving. */
+  BUCKET_W: 64,
+  buckets: null,
+  rebuildIndex() {
+    const span = CONFIG.WORLD_W + 800;
+    const n = Math.ceil(span / this.BUCKET_W);
+    if (!this.buckets || this.buckets.length !== n) {
+      this.buckets = new Array(n);
+      for (let i = 0; i < n; i++) this.buckets[i] = [];
+    } else {
+      for (let i = 0; i < n; i++) this.buckets[i].length = 0;
+    }
+    const put = (body) => {
+      const a = this.bucketIndex(body.bounds.min.x);
+      const b = this.bucketIndex(body.bounds.max.x);
+      for (let i = a; i <= b; i++) this.buckets[i].push(body);
+    };
+    for (const g of this.ground) put(g);
+    for (const rec of this.blocks) put(rec.body);
+    this.indexDirty = false;
+  },
+  bucketIndex(x) {
+    const i = Math.floor((x + 400) / this.BUCKET_W);
+    return Math.max(0, Math.min(this.buckets.length - 1, i));
+  },
+  candidatesAt(x) {
+    if (this.indexDirty || !this.buckets) this.rebuildIndex();
+    return this.buckets[this.bucketIndex(x)];
+  },
+};
+
+const ZERO = { x: 0, y: 0 };
+
+function segmentHitsAABB(x0, y0, x1, y1, b) {
+  // slab method
+  let t0 = 0, t1 = 1;
+  const dx = x1 - x0, dy = y1 - y0;
+  const clip = (p, q) => {
+    if (p === 0) return q >= 0;
+    const r = q / p;
+    if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; }
+    else       { if (r < t0) return false; if (r < t1) t1 = r; }
+    return true;
+  };
+  if (!clip(-dx, x0 - b.min.x)) return false;
+  if (!clip( dx, b.max.x - x0)) return false;
+  if (!clip(-dy, y0 - b.min.y)) return false;
+  if (!clip( dy, b.max.y - y0)) return false;
+  return true;
+}
+
+/* ============================================================= aim =======
+   ONE gesture. Touch down anywhere in the active player's slice, drag,
+   release. Pull back to fire forward — slingshot semantics.
+   ======================================================================== */
+const aim = {
+  active: false, pointerId: null,
+  startX: 0, startY: 0, curX: 0, curY: 0,
+  dirty: false,
+  dragX: 0, dragY: 0, dragLen: 0, speed: 0, dirX: 0, dirY: -1,
+  velX: 0, velY: 0,
+
+  arcXY: new Float64Array(CONFIG.ARC_MAX_STEPS * 2),
+  arcN: 0,
+
+  /* speed = MIN_SPEED + (|drag| / MAX_DRAG)^POWER_EXP * (MAX_SPEED - MIN_SPEED)
+     The exponent gives fine control at low power. */
+  powerCurve(len) {
+    const t = clamp(len / CONFIG.MAX_DRAG, 0, 1);
+    return CONFIG.MIN_SPEED + Math.pow(t, CONFIG.POWER_EXP) * (CONFIG.MAX_SPEED - CONFIG.MIN_SPEED);
+  },
+
+  /* drag = clamp(pointerStart - pointerNow, MAX_DRAG) */
+  computeDrag(sx, sy, cx, cy) {
+    let dx = sx - cx, dy = sy - cy;
+    let len = Math.hypot(dx, dy);
+    if (len > CONFIG.MAX_DRAG) {
+      const k = CONFIG.MAX_DRAG / len;
+      dx *= k; dy *= k; len = CONFIG.MAX_DRAG;
+    }
+    return { x: dx, y: dy, len };
+  },
+
+  /* Releasing below MIN_DRAG CANCELS the shot rather than firing it.
+     Without this, any stray tap in a 1024x768 slab fires a live 90 px lob
+     and burns the turn. */
+  shouldFire(len) { return len >= CONFIG.MIN_DRAG; },
+
+  update() {
+    const d = this.computeDrag(this.startX, this.startY, this.curX, this.curY);
+    this.dragX = d.x; this.dragY = d.y; this.dragLen = d.len;
+    this.speed = this.powerCurve(d.len);
+    if (d.len > 0.0001) { this.dirX = d.x / d.len; this.dirY = d.y / d.len; }
+    this.velX = this.dirX * this.speed;
+    this.velY = this.dirY * this.speed;
+  },
+
+  /* Projectile spawns SPAWN_OFFSET_Y above the character's top edge, so a
+     low-power shot clears the shooter's own parapet. */
+  launchPoint(chRec) {
+    const b = chRec.body;
+    return { x: b.position.x, y: b.bounds.min.y - CONFIG.SPAWN_OFFSET_Y };
+  },
+
+  /* The arc is computed by iterating the EXACT SAME integrator the engine
+     uses, not a closed-form parabola. Matter's Body.update is position-
+     Verlet: velocity is updated and THEN position advances by the new
+     velocity, so the true closed form is p0 + u*n + a*n(n+1)/2, not
+     p0 + u*n + 0.5*a*n^2. Iterating is a few hundred adds and is exact by
+     construction. */
+  integrate(x0, y0, vx, vy, maxSteps, onPoint) {
+    const k = CONFIG.STEP_MS / BASE_DELTA;
+    const a = CONFIG.GRAVITY_Y * CONFIG.GRAVITY_SCALE * CONFIG.STEP_MS * CONFIG.STEP_MS;
+    let dx = vx * k, dy = vy * k, x = x0, y = y0;
+    for (let s = 1; s <= maxSteps; s++) {
+      dy += a;
+      x += dx; y += dy;
+      if (onPoint(x, y, s) === false) return s;
+    }
+    return maxSteps;
+  },
+
+  /* Truncation: first ground/block intersection, the CULL BOUNDS, or
+     ARC_MAX_STEPS — whichever comes first. Note the cull bounds and NOT
+     y = 0 on the top edge: a near-vertical shot legitimately climbs above
+     the world and comes back down. */
+  arcOut(x, y) {
+    const c = CONFIG.CULL;
+    return x < c.minX || x > c.maxX || y > c.maxY;
+  },
+
+  blocked(x, y, ownChar) {
+    const cands = physics.candidatesAt(x);
+    for (let i = 0; i < cands.length; i++) {
+      const bb = cands[i].bounds;
+      if (x >= bb.min.x && x <= bb.max.x && y >= bb.min.y && y <= bb.max.y) return true;
+    }
+    for (let i = 0; i < physics.characters.length; i++) {
+      const c = physics.characters[i];
+      if (c === ownChar) continue;
+      const bb = c.body.bounds;
+      if (x >= bb.min.x && x <= bb.max.x && y >= bb.min.y && y <= bb.max.y) return true;
+    }
+    return false;
+  },
+
+  rebuildArc(chRec) {
+    const p = this.launchPoint(chRec);
+    const arr = this.arcXY;
+    let n = 0;
+    const self = this;
+    this.integrate(p.x, p.y, this.velX, this.velY, CONFIG.ARC_MAX_STEPS, (x, y, s) => {
+      arr[n * 2] = x; arr[n * 2 + 1] = y; n++;
+      if (self.arcOut(x, y)) return false;
+      if (s > CONFIG.SPAWN_GRACE_STEPS && self.blocked(x, y, chRec)) return false;
+      return true;
+    });
+    this.arcN = n;
+  },
+};
+
+function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+/* =========================================================== audio =======
+   Synthesized, never downloaded. Every entry point is guarded: an
+   AudioContext may throw, and an unguarded throw inside a turn takes the
+   turn with it.
+   ======================================================================== */
+const audio = {
+  ctx: null, on: true, noise: null, failed: false,
+
+  ensure() {
+    if (this.failed) return null;
+    try {
+      if (!this.ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) { this.failed = true; return null; }
+        this.ctx = new AC();
+      }
+      // iOS keeps the context suspended until a user gesture resumes it.
+      if (this.ctx.state === 'suspended' && this.ctx.resume) this.ctx.resume();
+    } catch (e) { this.failed = true; this.ctx = null; }
+    return this.ctx;
+  },
+
+  noiseBuffer() {
+    const c = this.ctx;
+    if (this.noise) return this.noise;
+    const n = Math.floor(c.sampleRate * 0.5);
+    const buf = c.createBuffer(1, n, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    this.noise = buf;
+    return buf;
+  },
+
+  /* boom — white-noise burst through a lowpass sweeping 1200 -> 80 Hz. */
+  boom(strength) {
+    if (!this.on) return;
+    const c = this.ensure(); if (!c) return;
+    try {
+      const t = c.currentTime;
+      const dur = 0.4;
+      const amp = clamp(0.25 + (strength || 0) * 0.0035, 0.25, 0.85);
+      const src = c.createBufferSource();
+      src.buffer = this.noiseBuffer();
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(1200, t);
+      lp.frequency.exponentialRampToValueAtTime(80, t + dur);
+      const g = c.createGain();
+      g.gain.setValueAtTime(amp, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(lp); lp.connect(g); g.connect(c.destination);
+      src.start(t); src.stop(t + dur);
+    } catch (e) { /* never let a cue take the turn with it */ }
+  },
+
+  /* launch — rising sine sweep, 120 ms. */
+  launch(power) {
+    if (!this.on) return;
+    const c = this.ensure(); if (!c) return;
+    try {
+      const t = c.currentTime, dur = 0.12;
+      const o = c.createOscillator(); o.type = 'sine';
+      const f0 = 220 + (power || 0) * 8;
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f0 * 2.4, t + dur);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, t + dur * 0.35);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(c.destination);
+      o.start(t); o.stop(t + dur);
+    } catch (e) {}
+  },
+
+  /* thunk — short filtered click for a hit that lands under IMPACT_HIT. */
+  thunk() {
+    if (!this.on) return;
+    const c = this.ensure(); if (!c) return;
+    try {
+      const t = c.currentTime, dur = 0.07;
+      const src = c.createBufferSource();
+      src.buffer = this.noiseBuffer();
+      const bp = c.createBiquadFilter();
+      bp.type = 'bandpass'; bp.frequency.value = 260; bp.Q.value = 1.2;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.18, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(bp); bp.connect(g); g.connect(c.destination);
+      src.start(t); src.stop(t + dur);
+    } catch (e) {}
+  },
+};
+
+/* =========================================================== turns =======
+   The ONLY module that calls setState(). M1 runs one slot cycling
+   PLAYER_TURN <-> TURN_RESULT.
+   ======================================================================== */
+const turns = {
+  cur: 0,
+  shotFired: false,
+  turnSteps: 0,      // accumulated fixed steps SINCE FIRING
+  calmSteps: 0,
+  resultSteps: 0,
+  lastFireAt: 0,
+  idleSinceMs: 0,
+  forcedEnds: 0,     // turns that ended via the TURN_MAX_STEPS backstop
+  shots: 0,
+
+  setState(next) {
+    state.curState = next;
+    if (next === STATES.PLAYER_TURN) {
+      /* Cleared ONLY when no projectile is in flight. That clause is
+         load-bearing: pausing mid-flight and resuming re-enters PLAYER_TURN,
+         and without it the lock would clear while the shot was still
+         travelling and the player could fire twice in one turn. */
+      state.inputLocked = (physics.projectile !== null);
+    } else {
+      state.inputLocked = true;
+    }
+  },
+
+  activeChar() { return physics.characters[this.cur] || null; },
+  activePlayer() { return players.list[this.cur] || null; },
+
+  beginTurn(idx) {
+    this.cur = idx;
+    this.shotFired = false;
+    this.turnSteps = 0;
+    this.calmSteps = 0;
+    this.resultSteps = 0;
+    this.idleSinceMs = performance.now();
+    this.restandIfFallen(idx);
+    physics.indexDirty = true;
+    aim.active = false;
+    aim.arcN = 0;
+    this.setState(STATES.PLAYER_TURN);
+  },
+
+  /* M1: a character that has fallen off (or off the world) is stood back up
+     on whatever remains of its castle so the loop stays playable.
+     The heart cost for falling is M2 — see the plan's Health section. */
+  restandIfFallen(idx) {
+    const ch = physics.characters[idx];
+    if (!ch) return;
+    const cas = physics.castles[ch.castleId];
+    const b = ch.body;
+    const gone = physics.dynamicBodies.indexOf(b) < 0;
+    const slice = { x0: cas.centreX - (cas.cols * CONFIG.BLOCK.w) / 2 - CONFIG.BLOCK.w,
+                    x1: cas.centreX + (cas.cols * CONFIG.BLOCK.w) / 2 + CONFIG.BLOCK.w };
+    const fell = b.position.y > cas.platformTopY + 120 ||
+                 b.position.x < slice.x0 || b.position.x > slice.x1;
+    if (!gone && !fell && Math.abs(b.angle) < 1.0) return;
+
+    const topY = physics.standingTopY(ch.castleId);
+    Body.setPosition(b, { x: cas.centreX, y: topY - CONFIG.CHARACTER.h / 2 - 1 });
+    Body.setAngle(b, 0);
+    Body.setVelocity(b, ZERO);
+    Body.setAngularVelocity(b, 0);
+    if (gone) physics.addDynamic(b);
+  },
+
+  /* The single fire path. A no-op unless we are in PLAYER_TURN and unlocked. */
+  fireShot() {
+    if (state.curState !== STATES.PLAYER_TURN || state.inputLocked) return false;
+    if (this.shotFired) return false;
+    const ch = this.activeChar();
+    if (!ch) return false;
+
+    aim.update();
+    if (!aim.shouldFire(aim.dragLen)) return false;   // cancel, turn not consumed
+
+    const p = aim.launchPoint(ch);
+    physics.spawnProjectile(p.x, p.y, aim.velX, aim.velY);
+    ch.facing = aim.dirX >= 0 ? 1 : -1;
+
+    this.shotFired = true;
+    this.turnSteps = 0;
+    this.calmSteps = 0;
+    this.shots++;
+    state.inputLocked = true;
+    aim.active = false;
+    aim.arcN = 0;
+    audio.launch(aim.speed);
+    return true;
+  },
+
+  /* Drain what physics recorded and decide who gets told. */
+  drain() {
+    const q = physics.queue;
+    for (let i = 0; i < q.length; i++) {
+      const e = q[i];
+      if (e.type === 'blockHit') {
+        audio.boom(e.impact);
+        render.shake(clamp(e.impact / 12, 2, 10));
+      } else if (e.type === 'charHit') {
+        audio.boom(e.impact);
+        render.shake(8);
+      } else if (e.type === 'tap') {
+        audio.thunk();
+      }
+    }
+    q.length = 0;
+  },
+
+  /* Turn-end evaluation runs ONCE PER RENDERED FRAME, not once per physics
+     step. The fixed step runs at 180 Hz; SETTLE_STEPS = 20 is 111 ms of
+     simulated time, so a 60 Hz check still samples it 6-7 times. Same
+     behaviour, a third of the work, zero allocation. */
+  frame(stepsThisFrame) {
+    this.drain();
+
+    if (state.curState === STATES.PLAYER_TURN) {
+      if (!this.shotFired) return;
+
+      // 4. Backstop, first so it always wins.
+      if (this.turnSteps >= CONFIG.TURN_MAX_STEPS) {
+        physics.forceQuiet();
+        this.forcedEnds++;
+        this.setState(STATES.TURN_RESULT);
+        this.resultSteps = 0;
+        return;
+      }
+      // 1. The projectile must be gone. A turn cannot end while it is a body.
+      if (physics.projectile) { this.calmSteps = 0; return; }
+      // 2. No damage-registering collision in the last QUIET_AFTER_IMPACT_STEPS.
+      if (physics.stepCount - physics.lastImpactStep < CONFIG.QUIET_AFTER_IMPACT_STEPS) {
+        this.calmSteps = 0; return;
+      }
+      // 3. Coarse calm for SETTLE_STEPS consecutive steps.
+      this.calmSteps = physics.worldIsCalm() ? this.calmSteps + stepsThisFrame : 0;
+      if (this.calmSteps >= CONFIG.SETTLE_STEPS) {
+        this.setState(STATES.TURN_RESULT);
+        this.resultSteps = 0;
+      }
+      return;
+    }
+
+    if (state.curState === STATES.TURN_RESULT) {
+      this.resultSteps += stepsThisFrame;
+      if (this.resultSteps >= CONFIG.TURN_RESULT_STEPS) {
+        /* M1 runs one slot, so "the next living player" is the same player.
+           The loop itself is what M1 has to certify: without it the input
+           lock never clears and the player gets exactly one shot ever. */
+        const n = players.list.length;
+        this.beginTurn((this.cur + 1) % n);
+      }
+    }
+  },
+
+  step() { if (this.shotFired) this.turnSteps++; },
+};
+
+/* Pure helpers, factored out so ?selftest=1 can assert them directly. */
+const turnRules = {
+  settleTick(calmSteps, isCalm, stepsThisFrame) { return isCalm ? calmSteps + stepsThisFrame : 0; },
+  isSettled(calmSteps) { return calmSteps >= CONFIG.SETTLE_STEPS; },
+  forceEnd(turnSteps) { return turnSteps >= CONFIG.TURN_MAX_STEPS; },
+  /* Precondition 1, as a predicate: a turn cannot end while a projectile
+     body exists, no matter how calm the world looks. */
+  canEndTurn(hasProjectile, stepsSinceImpact, calmSteps) {
+    if (hasProjectile) return false;
+    if (stepsSinceImpact < CONFIG.QUIET_AFTER_IMPACT_STEPS) return false;
+    return calmSteps >= CONFIG.SETTLE_STEPS;
+  },
+};
+
+/* ========================================================== render =======
+   Reads state, never mutates it. Never allocates per frame.
+   ======================================================================== */
+const render = {
+  skyGrad: null,
+  shakeMag: 0, shakeUntil: 0,
+  hintAlpha: 0,
+
+  invalidate() { this.skyGrad = null; },
+  shake(mag) { this.shakeMag = Math.max(this.shakeMag, mag); this.shakeUntil = performance.now() + 220; },
+
+  frame(nowMs) {
+    const ctx = view.ctx;
+    const W = view.canvas.width, H = view.canvas.height;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = CONFIG.COLOR.sky0 === null ? '#1a2555' : '#1a2555';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    ctx.save();
+    ctx.translate(view.offX, view.offY);
+    ctx.scale(view.scale, view.scale);
+
+    // Screen shake — world-space, so it never leaks into the letterbox bars.
+    let sx = 0, sy = 0;
+    if (nowMs < this.shakeUntil && this.shakeMag > 0) {
+      const t = (this.shakeUntil - nowMs) / 220;
+      sx = (Math.random() * 2 - 1) * this.shakeMag * t;
+      sy = (Math.random() * 2 - 1) * this.shakeMag * t;
+    } else { this.shakeMag = 0; }
+
+    ctx.beginPath();
+    ctx.rect(0, 0, CONFIG.WORLD_W, CONFIG.WORLD_H);
+    ctx.clip();
+    ctx.translate(sx, sy);
+
+    this.drawSky(ctx);
+    this.drawGround(ctx);
+    for (let i = 0; i < physics.blocks.length; i++) this.drawBlock(ctx, physics.blocks[i]);
+    for (let i = 0; i < physics.characters.length; i++) this.drawCharacter(ctx, physics.characters[i]);
+    const activeCh = turns.activeChar();
+    if (activeCh && state.curState === STATES.PLAYER_TURN) this.drawSling(ctx, activeCh);
+    if (aim.active && aim.arcN > 0) { this.drawBand(ctx); this.drawArc(ctx); }
+    if (physics.projectile) this.drawProjectile(ctx, physics.projectile);
+    this.drawHint(ctx, nowMs);
+
+    ctx.restore();
+  },
+
+  drawSky(ctx) {
+    if (!this.skyGrad) {
+      this.skyGrad = ctx.createLinearGradient(0, 0, 0, CONFIG.WORLD_H);
+      this.skyGrad.addColorStop(0, CONFIG.COLOR.sky0);
+      this.skyGrad.addColorStop(1, CONFIG.COLOR.sky1);
+    }
+    ctx.fillStyle = this.skyGrad;
+    ctx.fillRect(0, 0, CONFIG.WORLD_W, CONFIG.WORLD_H);
+  },
+
+  drawGround(ctx) {
+    for (let i = 0; i < physics.ground.length; i++) {
+      const g = physics.ground[i].plan;
+      ctx.fillStyle = CONFIG.COLOR.dirt;
+      ctx.fillRect(g.x, g.y, g.w, g.h);
+      ctx.fillStyle = CONFIG.COLOR.grass;
+      ctx.fillRect(g.x, g.y, g.w, 10);
+      ctx.strokeStyle = CONFIG.COLOR.ink;
+      ctx.lineWidth = 4;
+      ctx.strokeRect(g.x - 2, g.y, g.w + 4, g.h);
+    }
+  },
+
+  drawBlock(ctx, rec) {
+    const b = rec.body;
+    const w = CONFIG.BLOCK.w, h = CONFIG.BLOCK.h;
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    roundRect(ctx, -w / 2, -h / 2, w, h, 7);
+    ctx.fillStyle = rec.mat === 'stone' ? CONFIG.COLOR.stone : CONFIG.COLOR.wood;
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+    roundRect(ctx, -w / 2 + 4, -h / 2 + 4, w - 8, h / 3, 4); ctx.fill();
+    ctx.fillStyle = CONFIG.COLOR.ink;
+    ctx.font = '24px "Lilita One", sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(rec.label, 0, 2);
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 3;
+    roundRect(ctx, -w / 2, -h / 2, w, h, 7); ctx.stroke();
+    ctx.restore();
+  },
+
+  /* The "kid" silhouette. Facing is a RENDER concern only — the gesture is
+     already symmetric, so nothing about aiming is mirrored. */
+  drawCharacter(ctx, rec) {
+    const b = rec.body;
+    const w = CONFIG.CHARACTER.w, h = CONFIG.CHARACTER.h;
+    const col = CONFIG.COLOR.players[rec.castleId % 4];
+    ctx.save();
+    ctx.translate(b.position.x, b.position.y);
+    ctx.rotate(b.angle);
+    ctx.scale(rec.facing, 1);
+
+    // Raised arm FIRST so it sits behind the head — drawn after, its outline
+    // cut a line straight across the face.
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(6, -h / 2 + 20); ctx.lineTo(17, -h / 2 - 2); ctx.stroke();
+    ctx.strokeStyle = col; ctx.lineWidth = 4.5;
+    ctx.beginPath(); ctx.moveTo(6, -h / 2 + 20); ctx.lineTo(17, -h / 2 - 2); ctx.stroke();
+
+    // body
+    roundRect(ctx, -w / 2, -h / 2 + 12, w, h - 12, 9);
+    ctx.fillStyle = col; ctx.fill();
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 3; ctx.stroke();
+    // head
+    ctx.beginPath(); ctx.arc(0, -h / 2 + 8, 13, 0, Math.PI * 2);
+    ctx.fillStyle = CONFIG.COLOR.cream; ctx.fill(); ctx.stroke();
+    // eyes
+    ctx.fillStyle = CONFIG.COLOR.ink;
+    ctx.beginPath(); ctx.arc(4, -h / 2 + 6, 2.4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(-3, -h / 2 + 6, 2.4, 0, Math.PI * 2); ctx.fill();
+    // smile
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0.5, -h / 2 + 10, 4.5, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+    ctx.restore();
+  },
+
+  /* The slingshot itself, drawn in WORLD space (not the character's rotated
+     frame) so the fork lands exactly on the launch point the physics uses.
+     Always visible during a turn: it is the only thing on screen that tells a
+     non-reader what this game wants from them. */
+  drawSling(ctx, rec) {
+    const p = aim.launchPoint(rec);
+    const b = rec.body;
+    const hand = { x: b.position.x + 9 * rec.facing, y: b.bounds.min.y + 2 };
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#7a4a20'; ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(hand.x, hand.y); ctx.lineTo(p.x, p.y);        // handle
+    ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - 11, p.y - 15);    // left prong
+    ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 11, p.y - 15);    // right prong
+    ctx.stroke();
+    ctx.strokeStyle = '#4a2c12'; ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(hand.x, hand.y); ctx.lineTo(p.x, p.y);
+    ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - 11, p.y - 15);
+    ctx.moveTo(p.x, p.y); ctx.lineTo(p.x + 11, p.y - 15);
+    ctx.stroke();
+    ctx.restore();
+  },
+
+  /* The slingshot band is DRAWN, never simulated with a Constraint. A
+     MouseConstraint against an elastic Constraint makes release velocity
+     emergent from a spring, which is exactly what makes an accurate preview
+     impossible. */
+  drawBand(ctx) {
+    const ch = turns.activeChar(); if (!ch) return;
+    const p = aim.launchPoint(ch);
+    const pull = Math.min(aim.dragLen * 0.32, 52);
+    const bx = p.x - aim.dirX * pull, by = p.y - aim.dirY * pull;
+
+    // Bands run from the prong tips drawn in drawSling() to the pouch.
+    ctx.strokeStyle = '#c2703a'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(p.x - 11, p.y - 15); ctx.lineTo(bx, by);
+    ctx.moveTo(p.x + 11, p.y - 15); ctx.lineTo(bx, by);
+    ctx.stroke();
+
+    ctx.beginPath(); ctx.arc(bx, by, CONFIG.PROJECTILE.radius * 0.8, 0, Math.PI * 2);
+    ctx.fillStyle = CONFIG.COLOR.ball; ctx.fill();
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 3; ctx.stroke();
+
+    // power pip: how full the pull is, drawn as a ring that fills with gold
+    const t = clamp(aim.dragLen / CONFIG.MAX_DRAG, 0, 1);
+    ctx.beginPath();
+    ctx.arc(bx, by, CONFIG.PROJECTILE.radius * 1.5, -Math.PI / 2, -Math.PI / 2 + t * Math.PI * 2);
+    ctx.strokeStyle = CONFIG.COLOR.gold; ctx.lineWidth = 4; ctx.stroke();
+  },
+
+  drawArc(ctx) {
+    const a = aim.arcXY, n = aim.arcN;
+    ctx.fillStyle = CONFIG.COLOR.cream;
+    ctx.strokeStyle = CONFIG.COLOR.ink;
+    ctx.lineWidth = 2;
+    for (let i = CONFIG.ARC_DOT_EVERY - 1; i < n; i += CONFIG.ARC_DOT_EVERY) {
+      const r = 4.5 - 2.2 * (i / n);
+      ctx.beginPath();
+      ctx.arc(a[i * 2], a[i * 2 + 1], r, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+    }
+  },
+
+  drawProjectile(ctx, p) {
+    const r = CONFIG.PROJECTILE.radius;
+    ctx.save();
+    ctx.translate(p.position.x, p.position.y);
+    ctx.rotate(p.angle);
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = CONFIG.COLOR.ball; ctx.fill();
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 3; ctx.stroke();
+    ctx.beginPath(); ctx.arc(-r * 0.35, -r * 0.35, r * 0.26, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.fill();
+    ctx.restore();
+  },
+
+  /* In-world nudge, not a HUD. The M1 exit gate is a 4-year-old firing a
+     shot inside 30 seconds with nobody explaining anything. */
+  drawHint(ctx, nowMs) {
+    const show = state.curState === STATES.PLAYER_TURN && !state.inputLocked &&
+                 !aim.active && (nowMs - turns.idleSinceMs) > CONFIG.HINT_IDLE_MS;
+    this.hintAlpha += ((show ? 1 : 0) - this.hintAlpha) * 0.08;
+    if (this.hintAlpha < 0.02) return;
+    const ch = turns.activeChar(); if (!ch) return;
+    const p = aim.launchPoint(ch);
+    const t = (nowMs % 1600) / 1600;
+    const d = 30 + t * 70;
+
+    ctx.save();
+    ctx.globalAlpha = this.hintAlpha * (1 - t * 0.6);
+    ctx.strokeStyle = CONFIG.COLOR.gold; ctx.lineWidth = 5;
+    ctx.setLineDash([9, 9]); ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x - d * 0.75, p.y + d * 0.55);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(p.x - d * 0.75, p.y + d * 0.55, 13, 0, Math.PI * 2);
+    ctx.fillStyle = CONFIG.COLOR.gold; ctx.fill();
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 3; ctx.stroke();
+    ctx.restore();
+  },
+};
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y,     x + w, y + h, r);
+  c.arcTo(x + w, y + h, x,     y + h, r);
+  c.arcTo(x,     y + h, x,     y,     r);
+  c.arcTo(x,     y,     x + w, y,     r);
+  c.closePath();
+}
+
+/* ============================================================== ui =======
+   Emits actions downward into `turns`. Never mutates game state directly.
+   ======================================================================== */
+const ui = {
+  attach() {
+    const c = view.canvas;
+    c.addEventListener('pointerdown', this.onDown, { passive: false });
+    c.addEventListener('pointermove', this.onMove, { passive: false });
+    window.addEventListener('pointerup', this.onUp, { passive: false });
+    window.addEventListener('pointercancel', this.onUp, { passive: false });
+    window.addEventListener('resize', () => view.resize());
+    window.addEventListener('orientationchange', () => setTimeout(() => view.resize(), 60));
+
+    // Audio unlock — WebAudio is silent on iOS until resumed inside a gesture.
+    ['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
+      document.addEventListener(ev, () => audio.ensure(), { once: true, passive: true }));
+
+    // Never let a tab stall dump a huge backlog into the accumulator.
+    document.addEventListener('visibilitychange', () => { loopState.lastT = 0; });
+  },
+
+  inActiveSlice(wx, wy) {
+    const n = players.list.length;
+    const s = world.slice(n, turns.cur);
+    return wx >= s.x0 && wx <= s.x1 && wy >= 0 && wy <= CONFIG.WORLD_H;
+  },
+
+  onDown(ev) {
+    if (state.inputLocked || state.curState !== STATES.PLAYER_TURN) return;
+    if (aim.pointerId !== null) return;           // ignore a second finger
+    const p = view.toWorld(ev.clientX, ev.clientY);
+    if (!ui.inActiveSlice(p.x, p.y)) return;
+    aim.pointerId = ev.pointerId;
+    aim.active = true;
+    aim.startX = p.x; aim.startY = p.y;
+    aim.curX = p.x;   aim.curY = p.y;
+    aim.dirty = true;
+    turns.idleSinceMs = performance.now();
+    if (ev.cancelable) ev.preventDefault();
+    try { view.canvas.setPointerCapture(ev.pointerId); } catch (e) {}
+  },
+
+  /* The arc is recomputed AT MOST ONCE PER ANIMATION FRAME, not per
+     pointermove. touchmove fires 60-120 times a second on an iPad. */
+  onMove(ev) {
+    if (!aim.active || ev.pointerId !== aim.pointerId) return;
+    const p = view.toWorld(ev.clientX, ev.clientY);
+    aim.curX = p.x; aim.curY = p.y;
+    aim.dirty = true;
+    if (ev.cancelable) ev.preventDefault();
+  },
+
+  onUp(ev) {
+    if (!aim.active || ev.pointerId !== aim.pointerId) return;
+    const p = view.toWorld(ev.clientX, ev.clientY);
+    aim.curX = p.x; aim.curY = p.y;
+    aim.pointerId = null;
+    aim.update();
+    if (aim.shouldFire(aim.dragLen)) {
+      turns.fireShot();
+    } else {
+      aim.active = false;                 // cancelled; the turn is not consumed
+      aim.arcN = 0;
+      turns.idleSinceMs = performance.now();
+    }
+    if (ev.cancelable) ev.preventDefault();
+  },
+};
+
+/* ============================================================ loop =======
+   FIXED TIMESTEP. One rate, always: STEP_MS = 16.666 / 3 = 5.5555.
+   Accumulator-driven, decoupled from requestAnimationFrame, three steps per
+   60 Hz frame, capped at MAX_STEPS_PER_FRAME to avoid a death spiral.
+
+   There is NO conditional substepping. Matter applies gravity as a force
+   scaled by deltaTime^2, so a step rate that changes mid-flight changes the
+   trajectory, and positionIterations/velocityIterations are per-Engine.update
+   so towers would solve stiffer while a shot is airborne than while they
+   settle. crane-stacker/index.html:790,795 passes a variable dt. Not here.
+   ======================================================================== */
+const loopState = { lastT: 0, acc: 0, stepsThisFrame: 0 };
+
+/* Frame instrumentation for the M1 performance gate.
+   `frame` is the rAF interval, which is vsync-locked and therefore only
+   answers "are we holding 60 Hz". `work` is the number the body budget is
+   actually judged against: time spent inside the loop — physics steps plus
+   turn evaluation plus the draw — which is what has headroom or does not.
+   Only sampled under ?perf=1. */
+const perf = {
+  el: $('perf'),
+  lastPaint: 0,
+  ring(n) { return { buf: new Float64Array(n), idx: 0, filled: 0 }; },
+  frame: null, work: null, phys: null, draw: null,
+  init() {
+    this.frame = this.ring(180); this.work = this.ring(180);
+    this.phys = this.ring(180); this.draw = this.ring(180);
+  },
+  put(r, ms) { r.buf[r.idx] = ms; r.idx = (r.idx + 1) % r.buf.length; if (r.filled < r.buf.length) r.filled++; },
+  push(ms) { this.put(this.frame, ms); },
+  statsOf(r) {
+    const n = r.filled; if (!n) return null;
+    const a = Array.prototype.slice.call(r.buf, 0, n).sort((x, y) => x - y);
+    let sum = 0; for (let i = 0; i < n; i++) sum += a[i];
+    return { avg: sum / n, p50: a[(n * 0.5) | 0], p95: a[Math.min(n - 1, (n * 0.95) | 0)], max: a[n - 1], n };
+  },
+  stats() { return this.statsOf(this.frame); },
+  all() {
+    return { frame: this.statsOf(this.frame), work: this.statsOf(this.work),
+             phys: this.statsOf(this.phys), draw: this.statsOf(this.draw) };
+  },
+  row(label, s) {
+    if (!s) return label + '  --\n';
+    return label + ' avg ' + s.avg.toFixed(2) + '  p50 ' + s.p50.toFixed(2) +
+           '  p95 ' + s.p95.toFixed(2) + '  max ' + s.max.toFixed(2) + '\n';
+  },
+  paint(nowMs) {
+    if (nowMs - this.lastPaint < 400) return;
+    this.lastPaint = nowMs;
+    const a = this.all(); if (!a.frame) return;
+    const budget = a.work ? (a.work.p95 / 16.666 * 100) : 0;
+    this.el.textContent =
+      this.row('frame ms ', a.frame) +
+      this.row('work  ms ', a.work) +
+      this.row('  physics', a.phys) +
+      this.row('  render ', a.draw) +
+      'budget    ' + budget.toFixed(1) + '% of a 16.67 ms frame (p95 work)\n' +
+      'fps       ' + (1000 / a.frame.avg).toFixed(1) + '   (n=' + a.frame.n + ')\n' +
+      'steps/fr  ' + loopState.stepsThisFrame + '   STEP_MS ' + CONFIG.STEP_MS.toFixed(4) + '\n' +
+      'bodies    ' + physics.dynamicBodies.length + ' dynamic, ' + physics.blocks.length + ' blocks\n' +
+      'proj disp ' + physics.maxStepDisp.toFixed(2) + ' px/step  (radius ' + CONFIG.PROJECTILE.radius + ')\n' +
+      'tunnels   ' + physics.tunnelEvents + '\n' +
+      'shots     ' + turns.shots + '   forced turn ends ' + turns.forcedEnds + '\n' +
+      'state     ' + state.curState + (state.inputLocked ? ' [locked]' : '');
+  },
+};
+
+function stepWorld() {
+  Engine.update(physics.engine, CONFIG.STEP_MS);
+  physics.afterStep();
+  turns.step();
+}
+
+function loop(now) {
+  requestAnimationFrame(loop);
+
+  if (!loopState.lastT) loopState.lastT = now;
+  let frameMs = now - loopState.lastT;
+  loopState.lastT = now;
+  if (frameMs > 250) frameMs = 250;         // tab stall clamp
+  loopState.acc += frameMs;
+
+  const tWork = PERF ? performance.now() : 0;
+
+  let steps = 0;
+  while (loopState.acc >= CONFIG.STEP_MS && steps < CONFIG.MAX_STEPS_PER_FRAME) {
+    stepWorld();
+    loopState.acc -= CONFIG.STEP_MS;
+    steps++;
+  }
+  if (steps >= CONFIG.MAX_STEPS_PER_FRAME) loopState.acc = 0;   // drop the backlog
+  loopState.stepsThisFrame = steps;
+  const tPhys = PERF ? performance.now() : 0;
+
+  // Arc recompute: once per frame, only when the drag actually changed.
+  if (aim.active && aim.dirty) {
+    aim.update();
+    const ch = turns.activeChar();
+    if (ch) aim.rebuildArc(ch);
+    aim.dirty = false;
+  }
+
+  turns.frame(steps);
+  const tTurns = PERF ? performance.now() : 0;
+  render.frame(now);
+
+  if (PERF) {
+    const end = performance.now();
+    perf.push(frameMs);
+    perf.put(perf.work, end - tWork);
+    perf.put(perf.phys, tPhys - tWork);
+    perf.put(perf.draw, end - tTurns);
+    perf.paint(now);
+  }
+}
+
+/* ============================================================ boot =======
+   Failure path 2: fonts slow or missing. ctx.fillText with a webfont that
+   has not arrived silently falls back and does NOT re-render when it does.
+   Every block carries a label, so that is visible on the first frames of
+   every session. Race document.fonts.ready against FONT_TIMEOUT_MS and draw
+   whichever resolves first.
+   ======================================================================== */
+const FONT_PROBES = [
+  { css: '40px', family: 'Lilita One' },
+  { css: '500 20px', family: 'Fredoka' },
+];
+
+/* Neither document.fonts.load() nor document.fonts.check() can answer "is
+   this webfont actually usable yet", and both fail in the SAME direction —
+   they say yes when the answer is no:
+
+     * The @font-face rules are registered by the Google Fonts <link>, which
+       loads asynchronously. If load() runs first it matches no face,
+       resolves instantly with an empty list, and fonts.ready resolves too
+       because nothing is pending.
+     * check() returns true vacuously when no @font-face matches the family,
+       because the text is renderable with a system fallback.
+
+   Both were measured doing exactly that: with the font domains blocked
+   entirely, each cleared the splash in ~250 ms and the game drew every block
+   label in a fallback that never re-renders.
+
+   So measure instead. Render a probe string in the target family with a
+   generic fallback, and in the generic alone. Different widths mean the
+   webfont is really being used. Require a difference against 2 of 3 generics
+   so one coincidental metric match cannot produce a false positive. */
+let fontProbeCtx = null;
+function fontIsReallyLoaded(probe) {
+  if (!fontProbeCtx) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 8;
+    fontProbeCtx = c.getContext('2d');
+  }
+  const ctx = fontProbeCtx;
+  const text = 'ABCDEFGHIJ0123456789';
+  let differs = 0;
+  for (const fb of ['monospace', 'serif', 'sans-serif']) {
+    ctx.font = probe.css + ' ' + fb;
+    const base = ctx.measureText(text).width;
+    ctx.font = probe.css + ' "' + probe.family + '", ' + fb;
+    if (Math.abs(ctx.measureText(text).width - base) > 0.5) differs++;
+  }
+  return differs >= 2;
+}
+
+function waitForFonts(timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    let done = false;
+    const finish = (how) => { if (!done) { done = true; resolve(how); } };
+    setTimeout(() => finish('timeout'), timeoutMs);
+
+    const poll = () => {
+      if (done) return;
+      try {
+        if (FONT_PROBES.every(fontIsReallyLoaded)) return finish('loaded');
+        // Keep kicking the fetch; a no-op until the stylesheet registers the face.
+        if (document.fonts && document.fonts.load) {
+          FONT_PROBES.forEach(p => {
+            try { document.fonts.load(p.css + ' "' + p.family + '"').catch(() => {}); } catch (e) {}
+          });
+        }
+      } catch (e) { return finish('error'); }
+      if (performance.now() - t0 >= timeoutMs) return finish('timeout');
+      setTimeout(poll, 50);
+    };
+    poll();
+  });
+}
+
+async function boot() {
+  view.init();
+  physics.create();
+
+  const stress = PERF;
+  players.reset(1);
+  // M1: ONE castle. 3 columns x 4 rows = 12 blocks (the plan's 2-player
+  // castle, which is the generous one). ?perf=1 builds 40 blocks instead,
+  // which is the body count the performance budget is written against.
+  physics.build(1, stress ? { cols: 4, rows: 10 } : { cols: 3, rows: 4 });
+
+  ui.attach();
+
+  const how = await waitForFonts(CONFIG.FONT_TIMEOUT_MS);
+  if (window.console && PERF) console.log('[boot] fonts:', how);
+  $('splash').hidden = true;
+  if (PERF) { perf.init(); perf.el.hidden = false; }
+
+  turns.beginTurn(0);
+  requestAnimationFrame(loop);
+
+  if (SELFTEST) runSelftest();
+}
+
+/* ======================================================== selftest =======
+   No test/, no CI, no package.json — and the workspace forbids a build step
+   and npm, so vitest and jest are structurally unavailable. This harness is
+   the whole unit-test story: plain assertions over the pure functions,
+   behind ?selftest=1, skipped entirely on a normal load, and runnable on the
+   actual tablet.
+
+   M1 SUBSET: the plan lists 26 assertions across aim/cpu/turns/physics/
+   players/world/boot. `cpu`, `players` (hearts, awards, scoring) and the
+   turn-guard-order assertions cover code that does not exist until M2/M3, so
+   they are NOT stubbed here — a passing stub is worse than a missing test.
+   What runs below is every assertion whose subject M1 actually ships.
+
+   What this harness deliberately does NOT cover, so it never creates false
+   confidence: pointer-to-world mapping under real letterboxing, service
+   worker freshness, font readiness, iOS audio unlock, tunnelling under real
+   collision, and whether the drawn arc VISUALLY matches the flight. Those
+   are integration failures on a real device and belong to /qa.
+   ======================================================================== */
+function runSelftest() {
+  const results = [];
+  const T = (group, name, fn) => {
+    try {
+      const why = fn();
+      results.push({ group, name, ok: true, why: why || '' });
+    } catch (e) {
+      results.push({ group, name, ok: false, why: (e && e.message) || String(e) });
+    }
+  };
+  const ok = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'); };
+  const near = (a, b, eps, msg) => {
+    if (!(Math.abs(a - b) <= eps)) throw new Error((msg || 'not near') + ': ' + a + ' vs ' + b + ' (eps ' + eps + ')');
+    return a.toFixed(4) + ' ~= ' + b.toFixed(4);
+  };
+
+  /* ---- aim: power curve ---- */
+  T('aim', 'powerCurve(0) === MIN_SPEED', () =>
+    near(aim.powerCurve(0), CONFIG.MIN_SPEED, 1e-9));
+
+  T('aim', 'powerCurve(MAX_DRAG) === MAX_SPEED', () =>
+    near(aim.powerCurve(CONFIG.MAX_DRAG), CONFIG.MAX_SPEED, 1e-9));
+
+  T('aim', 'power curve is monotonic across the range', () => {
+    let prev = -Infinity;
+    for (let d = 0; d <= CONFIG.MAX_DRAG; d += 2) {
+      const s = aim.powerCurve(d);
+      ok(s > prev, 'not increasing at drag=' + d);
+      prev = s;
+    }
+    return 'strictly increasing over 0..' + CONFIG.MAX_DRAG;
+  });
+
+  T('aim', 'drag below MIN_DRAG cancels the shot', () => {
+    ok(aim.shouldFire(CONFIG.MIN_DRAG) === true, 'exactly MIN_DRAG should fire');
+    ok(aim.shouldFire(CONFIG.MIN_DRAG - 0.001) === false, 'just under MIN_DRAG must cancel');
+    ok(aim.shouldFire(0) === false, 'a tap with no drag must cancel');
+    return 'fires at >= ' + CONFIG.MIN_DRAG + ' px';
+  });
+
+  T('aim', 'drag clamps at MAX_DRAG', () => {
+    const d = aim.computeDrag(0, 0, 0, 1000);        // 1000 px pull
+    near(d.len, CONFIG.MAX_DRAG, 1e-9, 'length not clamped');
+    near(Math.hypot(d.x, d.y), CONFIG.MAX_DRAG, 1e-9, 'vector not clamped');
+    ok(d.y < 0, 'pull down must fire up: drag.y should be negative');
+    return 'clamped to ' + CONFIG.MAX_DRAG + ', direction preserved';
+  });
+
+  /* ---- aim: trajectory preview ---- */
+  T('aim', 'preview arc matches the engine integration after N steps', () => {
+    const N = 120;
+    const e = Engine.create({ enableSleeping: false });
+    e.gravity.y = CONFIG.GRAVITY_Y; e.gravity.scale = CONFIG.GRAVITY_SCALE;
+    const b = Bodies.circle(200, 300, CONFIG.PROJECTILE.radius, {
+      density: CONFIG.PROJECTILE.density, frictionAir: CONFIG.PROJECTILE.frictionAir,
+      collisionFilter: { mask: 0 },
+    });
+    Composite.add(e.world, b);
+    Body.setVelocity(b, { x: 9, y: -11 });
+    for (let i = 0; i < N; i++) Engine.update(e, CONFIG.STEP_MS);
+
+    let px = 0, py = 0;
+    aim.integrate(200, 300, 9, -11, N, (x, y) => { px = x; py = y; });
+    // Sub-pixel over 120 steps. Anything bigger means the integrator drifted.
+    near(px, b.position.x, 0.01, 'arc x');
+    near(py, b.position.y, 0.01, 'arc y');
+    return 'after ' + N + ' steps: dx=' + Math.abs(px - b.position.x).toExponential(2) +
+           ' dy=' + Math.abs(py - b.position.y).toExponential(2);
+  });
+
+  T('aim', 'a 768 px shot completes inside ARC_MAX_STEPS', () => {
+    // The longest shot the game can require: P1 -> P4 at 4 players.
+    const centres = world.castleCentres(4);
+    const range = centres[3] - centres[0];
+    near(range, 768, 1e-9, '4-player span');
+    const v = Math.sqrt(range * 0.2778);            // flat-ground 45 deg solution
+    ok(v <= CONFIG.MAX_SPEED, 'required v ' + v.toFixed(2) + ' exceeds MAX_SPEED');
+    const c = Math.SQRT1_2;
+    let steps = 0, landed = -1;
+    aim.integrate(centres[0], 700, v * c, -v * c, CONFIG.ARC_MAX_STEPS, (x, y, s) => {
+      steps = s;
+      if (y >= 700 && s > 2) { landed = s; return false; }
+      return true;
+    });
+    ok(landed > 0, 'never came back down inside ' + CONFIG.ARC_MAX_STEPS + ' steps');
+    ok(landed < CONFIG.ARC_MAX_STEPS, 'landed at the cap');
+    return 'v=' + v.toFixed(2) + ' lands at step ' + landed + ' of ' + CONFIG.ARC_MAX_STEPS;
+  });
+
+  T('aim', 'arc truncates at the cull bounds, not at y = 0', () => {
+    ok(aim.arcOut(0, -100) === false, 'y=-100 must NOT truncate the arc');
+    ok(aim.arcOut(0, -299) === false, 'above the world is legal for the preview');
+    ok(aim.arcOut(CONFIG.CULL.maxX + 1, 400) === true, 'right cull bound');
+    ok(aim.arcOut(CONFIG.CULL.minX - 1, 400) === true, 'left cull bound');
+    ok(aim.arcOut(400, CONFIG.CULL.maxY + 1) === true, 'bottom cull bound');
+    // A near-vertical max-power lob must climb above the world and survive.
+    let minY = Infinity;
+    aim.integrate(512, 500, 1, -CONFIG.MAX_SPEED, CONFIG.ARC_MAX_STEPS, (x, y) => {
+      if (y < minY) minY = y;
+      return !aim.arcOut(x, y);
+    });
+    ok(minY < 0, 'a near-vertical MAX_SPEED lob should climb above y=0, got ' + minY.toFixed(1));
+    return 'lob apex y=' + minY.toFixed(1) + ', not truncated';
+  });
+
+  T('aim', 'the projectile outlives the arc that promised it', () => {
+    /* The regression this exists for: PROJECTILE_MAX_STEPS = 300 against
+       ARC_MAX_STEPS = 420 deleted a near-vertical MAX_SPEED lob in mid-air,
+       240 px above the castle the preview had drawn it landing on. */
+    ok(CONFIG.PROJECTILE_MAX_STEPS >= CONFIG.ARC_MAX_STEPS,
+       'PROJECTILE_MAX_STEPS (' + CONFIG.PROJECTILE_MAX_STEPS + ') is below ARC_MAX_STEPS (' +
+       CONFIG.ARC_MAX_STEPS + ') — the ball dies before the drawn landing');
+
+    /* Worst case recomputed from CONFIG, so retuning MAX_SPEED, the block
+       size, the castle height or PLATFORM_DY_MAX re-fails this rather than
+       silently reintroducing the mid-air deletion. */
+    const highestPlatformTop = world.groundPlan[0].y - CONFIG.PLATFORM_DY_MAX;
+    const tallestRows = 4;                          // the plan's 12-block, 2-player castle
+    const launchY = highestPlatformTop - tallestRows * CONFIG.BLOCK.h
+                    - CONFIG.CHARACTER.h - CONFIG.SPAWN_OFFSET_Y;
+    let flight = 0;
+    aim.integrate(512, launchY, 0, -CONFIG.MAX_SPEED, 5000, (x, y, s) => {
+      flight = s;
+      return y < CONFIG.CULL.maxY;                  // fly until the bottom cull bound
+    });
+    ok(flight > 300, 'expected the worst-case lob to exceed the plan\'s original 300, got ' + flight);
+    ok(CONFIG.PROJECTILE_MAX_STEPS > flight,
+       'PROJECTILE_MAX_STEPS (' + CONFIG.PROJECTILE_MAX_STEPS +
+       ') does not cover the worst-case flight of ' + flight + ' steps');
+    const headroom = (CONFIG.PROJECTILE_MAX_STEPS / flight - 1) * 100;
+    ok(headroom >= 10, 'only ' + headroom.toFixed(0) + '% headroom — too tight to retune around');
+    return 'worst-case flight ' + flight + ' steps from launch y=' + launchY.toFixed(0) +
+           ', cap ' + CONFIG.PROJECTILE_MAX_STEPS + ' (' + headroom.toFixed(0) + '% headroom)';
+  });
+
+  /* ---- physics ---- */
+  T('physics', 'projectile mass is the 18-gon mass (7.98), not pi*r^2', () => {
+    const b = Bodies.circle(0, 0, CONFIG.PROJECTILE.radius, { density: CONFIG.PROJECTILE.density });
+    near(b.mass, 7.98, 0.02, 'projectile mass');
+    ok(Math.abs(b.mass - CONFIG.PROJECTILE.density * Math.PI * 324) > 0.1,
+       'mass must NOT equal the true-circle value');
+    return 'mass ' + b.mass.toFixed(3) + ' (true circle would be ' +
+           (CONFIG.PROJECTILE.density * Math.PI * 324).toFixed(3) + ')';
+  });
+
+  T('physics', 'impact = |relative normal velocity| * projectile mass', () => {
+    const m = 7.978;
+    const impactOf = (relN) => relN * m;
+    near(impactOf(7.5), CONFIG.IMPACT_HIT, 0.35, 'IMPACT_HIT threshold speed');
+    const v = CONFIG.IMPACT_HIT / m;
+    const dragForV = CONFIG.MAX_DRAG * Math.pow(
+      (v - CONFIG.MIN_SPEED) / (CONFIG.MAX_SPEED - CONFIG.MIN_SPEED), 1 / CONFIG.POWER_EXP);
+    ok(dragForV / CONFIG.MAX_DRAG > 0.2 && dragForV / CONFIG.MAX_DRAG < 0.45,
+       'threshold should sit near a third of full drag, got ' +
+       (dragForV / CONFIG.MAX_DRAG * 100).toFixed(0) + '%');
+    return 'IMPACT_HIT reached at v=' + v.toFixed(2) + ' = ' +
+           (dragForV / CONFIG.MAX_DRAG * 100).toFixed(0) + '% of full drag';
+  });
+
+  T('physics', 'below IMPACT_HIT pushes without damaging', () => {
+    const rec = { hp: 1 };
+    const apply = (impact) => { if (impact >= CONFIG.IMPACT_HIT) rec.hp -= 1; };
+    apply(CONFIG.IMPACT_HIT - 0.001);
+    ok(rec.hp === 1, 'a sub-threshold hit must not damage');
+    apply(CONFIG.IMPACT_HIT);
+    ok(rec.hp === 0, 'a hit at the threshold must damage');
+    return 'threshold is inclusive at ' + CONFIG.IMPACT_HIT;
+  });
+
+  T('physics', 'wood takes 1 hit, stone takes 2', () => {
+    ok(CONFIG.MAT_HITS.wood === 1, 'wood');
+    ok(CONFIG.MAT_HITS.stone === 2, 'stone');
+    let hp = CONFIG.MAT_HITS.wood;
+    hp -= 1; ok(hp <= 0, 'wood must be destroyed in one hit');
+    let sp = CONFIG.MAT_HITS.stone;
+    sp -= 1; ok(sp > 0, 'stone must survive one hit');
+    sp -= 1; ok(sp <= 0, 'stone must be destroyed by two');
+    return 'wood 1, stone 2 (stone ships at M2)';
+  });
+
+  T('physics', 'cull fires on all four bounds', () => {
+    ok(physics.outOfBounds(CONFIG.CULL.minX - 1, 400), 'left');
+    ok(physics.outOfBounds(CONFIG.CULL.maxX + 1, 400), 'right');
+    ok(physics.outOfBounds(400, CONFIG.CULL.maxY + 1), 'bottom');
+    ok(physics.outOfBounds(400, CONFIG.CULL.minY - 1), 'top');
+    ok(!physics.outOfBounds(512, 384), 'centre of the world must not cull');
+    ok(!physics.outOfBounds(0, 0), 'world corner must not cull');
+    return 'x<' + CONFIG.CULL.minX + ' x>' + CONFIG.CULL.maxX +
+           ' y>' + CONFIG.CULL.maxY + ' y<' + CONFIG.CULL.minY;
+  });
+
+  T('physics', 'per-step displacement cannot tunnel, gravity included', () => {
+    /* Matter.js has no continuous collision detection, so the whole
+       anti-tunnelling argument is this ratio.
+
+       The plan quotes 6 px/step = MAX_SPEED * (STEP_MS / BASE_DELTA). That is
+       only the LAUNCH figure. A shot fired downward keeps accelerating, so
+       the real worst case is bigger — measured at 7.5 px/step in the ?perf=1
+       stress run. This asserts the true bound: launch downward at MAX_SPEED,
+       then fall the full height of the world to the bottom cull bound. */
+    const launch = CONFIG.MAX_SPEED * (CONFIG.STEP_MS / BASE_DELTA);
+    near(launch, 6, 0.01, 'launch displacement per step');
+
+    const a = CONFIG.GRAVITY_Y * CONFIG.GRAVITY_SCALE * CONFIG.STEP_MS * CONFIG.STEP_MS;
+    let worst = 0, d = launch, y = CONFIG.CULL.minY;
+    while (y < CONFIG.CULL.maxY) { d += a; y += d; if (d > worst) worst = d; }
+
+    ok(worst < CONFIG.PROJECTILE.radius,
+       'worst-case step ' + worst.toFixed(2) + ' px reaches the projectile radius ' +
+       CONFIG.PROJECTILE.radius + ' — tunnelling becomes possible');
+    ok(worst < CONFIG.BLOCK.w / 2,
+       'worst-case step must stay under half a block (' + (CONFIG.BLOCK.w / 2) + ')');
+    return 'launch ' + launch.toFixed(2) + ', worst case ' + worst.toFixed(2) +
+           ' px/step vs radius ' + CONFIG.PROJECTILE.radius + ' and block ' + CONFIG.BLOCK.w;
+  });
+
+  /* ---- world ---- */
+  T('world', 'castle centres for n=2,3,4 match WORLD_W*(i+0.5)/n', () => {
+    const expect = { 2: [256, 768], 3: [512 / 3, 512, 2560 / 3], 4: [128, 384, 640, 896] };
+    for (const n of [2, 3, 4]) {
+      const got = world.castleCentres(n);
+      ok(got.length === n, 'wrong count for n=' + n);
+      for (let i = 0; i < n; i++) near(got[i], expect[n][i], 1e-9, 'n=' + n + ' i=' + i);
+    }
+    return 'n=2 [256,768]  n=3 [171,512,853]  n=4 [128,384,640,896]';
+  });
+
+  T('world', 'slices tile the world with no gap or overlap', () => {
+    for (const n of [1, 2, 3, 4]) {
+      let prev = 0;
+      for (let i = 0; i < n; i++) {
+        const s = world.slice(n, i);
+        near(s.x0, prev, 1e-9, 'gap at n=' + n + ' i=' + i);
+        prev = s.x1;
+      }
+      near(prev, CONFIG.WORLD_W, 1e-9, 'slices do not reach the right edge at n=' + n);
+    }
+    return 'n=1..4 tile 0..' + CONFIG.WORLD_W + ' exactly';
+  });
+
+  T('world', 'label mix always finds an eligible block for letters AND numbers', () => {
+    for (const count of [9, 12]) {
+      const mix = CONFIG.LABEL_MIX[count];
+      ok(mix, 'no mix for ' + count);
+      ok(mix.letters + mix.numbers === count, 'mix does not sum to ' + count);
+      ok(mix.letters > 0 && mix.numbers > 0, 'both modes need at least one');
+      for (let trial = 0; trial < 60; trial++) {
+        const labels = world.makeLabels(count, Math.random);
+        ok(labels.length === count, 'wrong label count');
+        const letters = labels.filter(l => /[A-Z]/.test(l));
+        const numbers = labels.filter(l => /[0-9]/.test(l));
+        ok(letters.length === mix.letters, 'letters ' + letters.length + ' != ' + mix.letters);
+        ok(numbers.length === mix.numbers, 'numbers ' + numbers.length + ' != ' + mix.numbers);
+        ok(new Set(labels).size === count, 'repeats inside one castle');
+      }
+    }
+    return '60 shuffles each at 9 and 12: mix held, no repeats';
+  });
+
+  T('world', 'block descriptor -> world conversion respects +y DOWN', () => {
+    const platformTopY = 700, baseLeftX = 452;
+    near(world.blockWorldX(baseLeftX, 0), 472, 1e-9, 'gx=0 centre');
+    near(world.blockWorldX(baseLeftX, 2), 552, 1e-9, 'gx=2 centre');
+    near(world.blockWorldY(platformTopY, 0), 680, 1e-9, 'gy=0 (bottom row) centre');
+    near(world.blockWorldY(platformTopY, 3), 560, 1e-9, 'gy=3 centre');
+    ok(world.blockWorldY(platformTopY, 3) < world.blockWorldY(platformTopY, 0),
+       'higher gy must mean SMALLER y');
+    return 'gy=0 at y=680, gy=3 at y=560 — rows stack upward';
+  });
+
+  /* ---- turns ---- */
+  T('turns', 'a turn cannot end while a projectile body exists', () => {
+    ok(turnRules.canEndTurn(true, 9999, 9999) === false,
+       'projectile present must block turn end even when everything is calm');
+    ok(turnRules.canEndTurn(false, 9999, CONFIG.SETTLE_STEPS) === true,
+       'no projectile + quiet + settled must end the turn');
+    return 'precondition 1 holds against a fully calm world';
+  });
+
+  T('turns', 'a recent impact blocks turn end', () => {
+    ok(turnRules.canEndTurn(false, CONFIG.QUIET_AFTER_IMPACT_STEPS - 1, 9999) === false,
+       'must wait out QUIET_AFTER_IMPACT_STEPS');
+    ok(turnRules.canEndTurn(false, CONFIG.QUIET_AFTER_IMPACT_STEPS, CONFIG.SETTLE_STEPS) === true,
+       'clear once the quiet window has passed');
+    return 'quiet window ' + CONFIG.QUIET_AFTER_IMPACT_STEPS + ' steps (' +
+           (CONFIG.QUIET_AFTER_IMPACT_STEPS * CONFIG.STEP_MS).toFixed(0) + ' ms)';
+  });
+
+  T('turns', 'settle needs SETTLE_STEPS CONSECUTIVE steps', () => {
+    let calm = 0;
+    for (let i = 0; i < CONFIG.SETTLE_STEPS - 1; i++) calm = turnRules.settleTick(calm, true, 1);
+    ok(!turnRules.isSettled(calm), 'settled too early at ' + calm);
+    calm = turnRules.settleTick(calm, false, 1);            // one jittery sample
+    ok(calm === 0, 'a single non-calm sample must reset the counter');
+    for (let i = 0; i < CONFIG.SETTLE_STEPS; i++) calm = turnRules.settleTick(calm, true, 1);
+    ok(turnRules.isSettled(calm), 'never settled after a clean run');
+    return 'resets to 0 on any non-calm sample; settles at ' + CONFIG.SETTLE_STEPS;
+  });
+
+  T('turns', 'settle thresholds are the COARSE ones', () => {
+    ok(CONFIG.SETTLE_V === 1.2, 'SETTLE_V must be 1.2, not the fine 0.2');
+    ok(CONFIG.SETTLE_W === 0.08, 'SETTLE_W must be 0.08, not the fine 0.02');
+    // crane-stacker uses 0.2 / 0.02 for landing detection. Copying those here
+    // with sleeping off would run almost every turn to the 12-second cap.
+    ok(CONFIG.SETTLE_V > 0.2 && CONFIG.SETTLE_W > 0.02, 'fine thresholds leaked in');
+    return '|v|<1.2 |w|<0.08 over ' + CONFIG.SETTLE_STEPS + ' steps';
+  });
+
+  T('turns', 'TURN_MAX_STEPS force-ends the turn', () => {
+    ok(turnRules.forceEnd(CONFIG.TURN_MAX_STEPS - 1) === false, 'ended early');
+    ok(turnRules.forceEnd(CONFIG.TURN_MAX_STEPS) === true, 'never force-ended');
+    near(CONFIG.TURN_MAX_STEPS * CONFIG.STEP_MS / 1000, 12, 0.01, 'backstop is 12s of sim time');
+    return CONFIG.TURN_MAX_STEPS + ' steps = 12.00 s of simulated time';
+  });
+
+  T('turns', 'sleeping is OFF and the step rate is fixed', () => {
+    ok(physics.engine.enableSleeping === false,
+       'enableSleeping true leaves destroyed supports hanging in mid-air');
+    near(CONFIG.STEP_MS, 16.666 / 3, 1e-12, 'STEP_MS');
+    near(CONFIG.STEP_MS * 3, 16.666, 1e-12, 'three steps per 60Hz frame');
+    ok(CONFIG.MAX_STEPS_PER_FRAME === 8, 'death-spiral cap');
+    return 'enableSleeping=false, STEP_MS=' + CONFIG.STEP_MS.toFixed(4) + ', cap 8/frame';
+  });
+
+  T('turns', 'entering PLAYER_TURN only unlocks input when nothing is in flight', () => {
+    const saved = physics.projectile;
+    const savedState = state.curState, savedLock = state.inputLocked;
+    physics.projectile = { fake: true };
+    turns.setState(STATES.PLAYER_TURN);
+    ok(state.inputLocked === true, 'lock cleared while a shot was still travelling');
+    physics.projectile = null;
+    turns.setState(STATES.PLAYER_TURN);
+    ok(state.inputLocked === false, 'lock never cleared with an empty world');
+    turns.setState(STATES.TURN_RESULT);
+    ok(state.inputLocked === true, 'TURN_RESULT must lock input');
+    physics.projectile = saved;
+    state.curState = savedState; state.inputLocked = savedLock;
+    return 'lock survives a pause mid-flight';
+  });
+
+  /* ---- boot ---- */
+  T('boot', 'window.Matter absent takes the retry-card path', () => {
+    ok(bootCheck({}) === 'retry', 'no Matter must mean retry');
+    ok(bootCheck({ Matter: null }) === 'retry', 'null Matter must mean retry');
+    ok(bootCheck(undefined) === 'retry', 'undefined global must mean retry');
+    ok(bootCheck({ Matter: {} }) === 'ok', 'present Matter must boot');
+    ok(!!$('retry'), 'the retry card must exist in the DOM');
+    return 'retry card reachable; ok only when Matter is present';
+  });
+
+  T('boot', 'the font probe detects a real webfont, not a fallback', () => {
+    /* The regression this exists for: both document.fonts.load() and
+       document.fonts.check() report success when no @font-face matches,
+       so the splash cleared in ~250 ms with the font domains blocked and
+       every block label drew in a fallback. */
+    ok(fontIsReallyLoaded({ css: '40px', family: 'Lilita One' }) === true,
+       'Lilita One is loaded on this page but the probe says otherwise');
+    ok(fontIsReallyLoaded({ css: '500 20px', family: 'Fredoka' }) === true,
+       'Fredoka is loaded on this page but the probe says otherwise');
+    ok(fontIsReallyLoaded({ css: '40px', family: 'No Such Font Zz9' }) === false,
+       'the probe returns true for a family that does not exist — it is measuring nothing');
+    return 'detects Lilita One + Fredoka, rejects a nonexistent family';
+  });
+
+  /* ---- view ---- */
+  T('view', 'toWorld inverse-transforms through the letterbox', () => {
+    // Portrait: 768 x 1024. scale = min(768/1024, 1024/768) = 0.75.
+    // offX = 0, offY = (1024 - 768*0.75)/2 = 224.
+    const s = Math.min(768 / 1024, 1024 / 768);
+    near(s, 0.75, 1e-9, 'portrait scale');
+    const offY = (1024 - CONFIG.WORLD_H * s) / 2;
+    near(offY, 224, 1e-9, 'portrait letterbox bar');
+    const p = view.static_toWorld(384, 512, 0, 0, 0, offY, s);
+    near(p.x, 512, 1e-9, 'centre x');
+    near(p.y, 384, 1e-9, 'centre y');
+    // The naive version (raw canvas coords) is off by the bar height. If that
+    // ever matches, the inverse transform has been dropped.
+    const naive = { x: 384 / s, y: 512 / s };
+    ok(Math.abs(naive.y - p.y) > 100,
+       'raw coords must NOT agree with toWorld in portrait — off by ' +
+       Math.abs(naive.y - p.y).toFixed(0) + ' px');
+    return 'portrait centre maps to (512,384); raw coords would be off by ' +
+           Math.abs(naive.y - p.y).toFixed(0) + ' px';
+  });
+
+  /* ---- report ---- */
+  const passed = results.filter(r => r.ok).length;
+  const total = results.length;
+  const list = $('st-list');
+  for (const r of results) {
+    const li = document.createElement('li');
+    li.className = r.ok ? 'ok' : 'bad';
+    li.innerHTML =
+      '<span class="tag">' + (r.ok ? 'PASS' : 'FAIL') + '</span>' +
+      '<span class="grp">' + r.group + '</span>' +
+      '<span class="msg">' + r.name + '<span class="why">' + r.why + '</span></span>';
+    list.appendChild(li);
+  }
+  const score = $('st-score');
+  score.textContent = passed + ' / ' + total + (passed === total ? '  PASS' : '  FAIL');
+  score.className = passed === total ? 'pass' : 'fail';
+  $('selftest').hidden = false;
+
+  const line = 'selftest ' + passed + '/' + total;
+  if (passed === total) console.log('%c' + line + ' PASS', 'color:#43e6a5;font-weight:700');
+  else console.error(line + ' FAIL', results.filter(r => !r.ok));
+
+  window.__selftest = { passed, total, results };
+  return { passed, total };
+}
+
+// Small surface for /qa and the perf gate. Not used by the game itself.
+window.CastleBlasters = { CONFIG, state, turns, physics, aim, world, view, players, perf };
+
+boot();
+})();
+</script>
+
+<!-- Service worker registration for PWA / offline -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js')
+        .catch(err => console.warn('Service worker registration failed:', err));
+    });
+  }
+</script>
+</body>
+</html>
