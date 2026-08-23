@@ -92,6 +92,59 @@
   #st-list li .msg { flex: 1 1 auto; }
   #st-list li .why { display: block; opacity: .7; font-size: 12px; }
 
+  /* ---------------------------------------------------------------- M2 ---
+     Three overlays and one button. This is NOT the DOM HUD — that is M3
+     (player pill, heart pips, round pill, score pill). These are the minimum
+     the M2 turn loop needs in order to be playable and testable:
+       #pass   pass-the-device, shown only when the NEXT player is human
+       #paused the only mid-match affordance; the M2 exit gate requires a
+               pause mid-flight to prove the input lock survives it
+       #final  the win condition made visible. Rankings and awards are M3.
+     Absolute CSS px, not world units, so they stay readable when the world
+     is letterboxed into portrait. */
+  .sheet { flex-direction: column; gap: 16px; background: rgba(13,19,48,.94); }
+  .sheet .who {
+    font-family: 'Lilita One', sans-serif; font-size: 26px; letter-spacing: 2px;
+    color: var(--cream); text-align: center;
+  }
+  .sheet .who2 {
+    font-family: 'Lilita One', sans-serif; font-size: 34px; letter-spacing: 1px;
+    color: var(--cream); text-align: center;
+  }
+  .sheet .badge {
+    width: 132px; height: 132px; border-radius: 50%;
+    border: 7px solid var(--ink); box-shadow: 0 7px 0 var(--ink);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Lilita One', sans-serif; font-size: 68px; color: var(--ink);
+  }
+  .sheet .kind {
+    font-family: 'Fredoka', sans-serif; font-weight: 700; font-size: 17px;
+    letter-spacing: 2px; color: var(--gold);
+  }
+  button.big {
+    font-family: 'Lilita One', sans-serif; font-size: 30px; letter-spacing: 1px;
+    padding: 18px 40px; border-radius: 24px; border: 6px solid var(--ink);
+    background: var(--gold); color: var(--ink); box-shadow: 0 7px 0 var(--ink);
+    cursor: pointer; touch-action: manipulation;
+  }
+  button.big:active { transform: translateY(4px); box-shadow: 0 3px 0 var(--ink); }
+  /* Self-disable on first activation. A 4-year-old double-taps everything, so
+     the button stops being a button before the second tap lands. */
+  button.big[disabled] { opacity: .45; pointer-events: none; }
+
+  #pause-btn {
+    position: fixed; z-index: 9;
+    top: calc(10px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+    width: 54px; height: 54px; border-radius: 16px;
+    border: 4px solid var(--ink); background: var(--gold); color: var(--ink);
+    box-shadow: 0 4px 0 var(--ink);
+    font-size: 20px; line-height: 1; letter-spacing: 2px; cursor: pointer;
+    touch-action: manipulation;
+  }
+  #pause-btn[hidden] { display: none; }
+  #pause-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--ink); }
+
   /* ?perf=1 */
   #perf {
     position: fixed; top: 8px; left: 8px; z-index: 8;
@@ -127,12 +180,39 @@
   </div>
 </div>
 
+<!-- M2: pass-the-device. Shown ONLY when the next living player is human,
+     so a solo game against the CPU never sees it. -->
+<div class="overlay sheet" id="pass" hidden>
+  <div class="who">PASS THE TABLET TO</div>
+  <div class="badge" id="pass-badge"><span id="pass-num">1</span></div>
+  <div class="who2" id="pass-name">PLAYER 1</div>
+  <div class="kind" id="pass-kind">YOUR TURN</div>
+  <button class="big" id="pass-btn" type="button">I'M READY</button>
+</div>
+
+<!-- M2: the only mid-match affordance. SETTINGS and HOME land at M3 with the
+     rest of the shell; RESUME is what the M2 exit gate needs. -->
+<div class="overlay sheet" id="paused" hidden>
+  <div class="who">PAUSED</div>
+  <button class="big" id="resume-btn" type="button">RESUME</button>
+</div>
+
+<!-- M2: the win condition made visible. Rankings, scores and awards are M3. -->
+<div class="overlay sheet" id="final" hidden>
+  <div class="who" id="final-title">WINNER</div>
+  <div class="badge" id="final-badge"><span id="final-num">1</span></div>
+  <div class="who2" id="final-name">PLAYER 1</div>
+  <button class="big" id="again-btn" type="button">PLAY AGAIN</button>
+</div>
+
+<button id="pause-btn" type="button" hidden aria-label="Pause">&#10074;&#10074;</button>
+
 <div id="perf" hidden></div>
 
 <script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
 <script>
 /* ==========================================================================
-   CASTLE BLASTERS — M1 (Feel)
+   CASTLE BLASTERS — M2 (Turns)
 
    Everything lives in this one file: no build step, no npm, no framework
    (workspace CLAUDE.md). Matter.js arrives from the same jsdelivr URL the
@@ -142,23 +222,39 @@
    enforces it. Modules may only call DOWNWARD in this order:
 
        CONFIG -> view -> state -> world / players / turns
-              -> physics -> audio -> render -> ui
+              -> physics -> cpu -> audio -> render -> ui
 
-   Three consequences, stated so they are not quietly broken later:
+   Four consequences, stated so they are not quietly broken later:
      * Only `turns` calls setState(). Every other module returns a value or
        raises an intent. This is what stops a turn ending twice.
+     * `turns` is also the only module that mutates a player slot. `players`
+       reports that a slot died; `turns` is what tells `physics` to remove
+       the character and `render` to puff.
      * `render` and `ui` never mutate game state, and `render` never
        allocates per frame.
      * `physics` never calls `ui` or `audio` directly. It records what
        happened into a queue; `turns` drains it and decides what it means.
 
-   M1 SCOPE: canvas + fixed letterboxed world, ground from a descriptor, ONE
-   castle of wood blocks, one character on top of it, the slingshot gesture,
-   the live dotted arc, projectile flight, damage, block destruction, a
-   WebAudio boom, and the PLAYER_TURN <-> TURN_RESULT loop running one slot.
+   THE RULES MODULES. `turnRules` and `playerRules` hold the definitions of
+   turn end, the guard order, and the health model. The game calls them and
+   ?selftest=1 asserts them — the SAME functions, never a parallel copy. An
+   earlier draft reimplemented the turn-end predicates inline beside a
+   `turnRules` only the harness ran, so breaking the shipped path would have
+   left the harness green. Do not reintroduce that shape.
 
-   NOT M1: turns proper, opponents, CPU, scoring, HUD, setup, pass-device,
-   awards, bonus targets, TTS, stone blocks, the launcher tile.
+   M1 SCOPE (feel): canvas + fixed letterboxed world, ground from a
+   descriptor, one castle, the slingshot gesture, the live dotted arc,
+   projectile flight, damage, block destruction, WebAudio.
+
+   M2 SCOPE (turns): slot population and the HUMAN/CPU flag, the turn and
+   round managers, the CPU solver with error injection and the silly shot,
+   pass-the-device, hearts, the fall check, elimination, the win condition,
+   stone blocks and stepped platforms.
+
+   NOT M2: the setup screen, the DOM HUD, the scoring display, round intro
+   and final-results SCREENS, awards, the parent settings panel,
+   localStorage, bonus targets, TTS, confetti, the launcher tile, the
+   poster. Those are M3-M5, each with its own exit gate.
 
    Copied from crane-stacker/index.html: the Matter bootstrap, the canvas
    loop at devicePixelRatio, off-screen culling, the localStorage try/catch
@@ -260,13 +356,107 @@ const CONFIG = {
   TURN_RESULT_STEPS: 90,          // M1 addition: 0.5s beat on TURN_RESULT before the next turn
 
   // match
-  HEARTS: { 2: 3, 3: 2, 4: 2 },   // scales with player count (M2)
+  HEARTS: { 2: 3, 3: 2, 4: 2 },   // scales with player count
   ROUND_MAX: 12,
   PLATFORM_DY_MAX: 80,            // bounds the MAX_SPEED derivation
 
-  // cpu (M2; v1 ships easy only)
+  /* M2 CHOICE — the stepped platform height the plan left as Open Question 1.
+     Castle i sits on a platform (i % 2) * PLATFORM_DY above the base ground,
+     so the skyline alternates and a far castle is never fully occluded.
+
+     60, not the 80 the derivation is bounded at. MAX_SPEED = 18 is only
+     justified while the largest platform delta stays <= PLATFORM_DY_MAX, and
+     the whole point of leaving headroom is not spending all of it. Re-derived
+     against 60 (?selftest=1 recomputes this from CONFIG, so raising it
+     re-fails rather than silently invalidating MAX_SPEED):
+
+       longest shot   = castleCentres(4)[3] - [0]        = 768 px
+       worst uphill   = max platform delta                =  60 px
+       g              = GRAVITY_Y * GRAVITY_SCALE * 16.666^2 = 0.27776
+       v_min^2        = g * (h + sqrt(h^2 + R^2))        = 230.6
+       v_min          = 15.19   vs MAX_SPEED 18          = 18.5% headroom
+
+     (At the bounding 80 the plan gets 15.4 and ~17%. Both hold; 60 holds by
+     more, and it still reads as a visibly stepped skyline.) */
+  PLATFORM_DY: 60,
+  PLATFORM_PAD: 30,               // platform overhangs the castle footprint each side
+  PLATFORM_SKIRT: 12,             // and sinks this far into the base ground, so no seam
+
+  /* Bottom N rows are stone (2 hits), everything above is wood (1 hit). The
+     plan ships both materials and never says where stone goes. A stone
+     foundation is the reading a 4-year-old can state out loud, it is
+     identical for every player so nothing is unfair, and it lands exactly
+     where the CPU aims (the lowest standing block) so the bot's best shot
+     goes clang-then-smash instead of smash. Materials differ in hit points
+     ONLY — same density, same friction. Ice was cut for having a physics
+     property; stone must not quietly reintroduce one. */
+  STONE_ROWS: 1,
+
+  /* A character fell if, at turn end, its centre is more than FALL_DY below
+     where it stood when the turn began, or outside its own castle footprint.
+
+     M2 CORRECTION to the plan, which says "more than 120 px below its own
+     PLATFORM's top surface". That cannot fire: the character stands on TOP of
+     its castle, so on a 3-row castle its home is already 142 px ABOVE the
+     platform top and it would have to end up underground to qualify. The rule
+     exists to catch precisely the case the plan names — "knocking an enemy
+     character off its collapsing castle onto the ground" — so the reference
+     has to be where it was standing, not the platform under the castle.
+
+     80 is derived from the castles the game actually builds, and ?selftest=1
+     asserts both ends of the bracket:
+       must fire:     a full topple off the SHORTEST castle = 3 rows = 120 px
+       must NOT fire: losing one row of cover                =         40 px
+     So FALL_DY must sit strictly inside (40, 120). 80 is two block rows. */
+  FALL_DY: 80,
+  FALL_SLICE_PAD: 40,             // horizontal grace outside the castle footprint
+
+  /* "Standing", for CPU targeting and (at M4) bonus targets. All three of:
+     present in the world, centre inside its own castle footprint, and upright
+     AND elevated. Without the last clause a block lying flat on the ground
+     inside its own slice counts as cover, which skews "fewest standing
+     blocks" toward castles that are already flattened. */
+  STANDING_MAX_ANGLE_DEG: 30,
+  STANDING_SLOP: 2,               // Matter lets a resting body sink a hair
+
+  // scoring (tracked at M2; the floating labels and the HUD are M3)
+  SCORE: { blockHit: 10, woodKill: 25, stoneKill: 50,
+           charHit: 100, bonus: 150, knockout: 200 },
+
+  // cpu (v1 ships easy only)
   CPU: { angleErrDeg: 12, powerJitter: 0.08,
-         sillyShotChance: 0.12, thinkMs: 700 },
+         sillyShotChance: 0.12, thinkMs: 700,
+         /* Presentation: think, then line up with the same dotted arc a human
+            sees, then fire. The kid gets to watch the bot aim and miss. Both
+            are counted in SIMULATED steps, not wall clock, for the same
+            reason TURN_MAX_STEPS is — steps do not advance while PAUSED. */
+         aimMs: 600,
+         /* Solve at just over the minimum speed that reaches the target: the
+            lobbiest shot that works, which is also the one most likely to
+            clear an intervening castle. 1.06 keeps the discriminant safely
+            positive (it is exactly zero at the minimum). */
+         solveMargin: 1.06,
+         /* An obstruction only counts if the arc dies well short of the aim
+            point — otherwise every good shot reads as blocked, because it
+            terminates on the block it was aimed at. */
+         blockTolPx: 60,
+         /* Silly shot: a deliberate near-vertical launch that lands on or
+            near the bot's own castle. Angular error alone lands short or long
+            on the correct SIDE and essentially never behind the shooter, so
+            this is the only mechanism that produces self-demolition. */
+         /* The plan says 75-88 deg at low-to-mid power. 75 does not survive
+            contact with the geometry: the launch point sits ~200 px ABOVE the
+            platform (the character stands on top of the castle), so the extra
+            fall buys the shot enough hang time to carry 229 px sideways —
+            past its own castle, out of its own slice, and at 4 players into
+            the neighbour's. A silly shot that can land on an opponent is not
+            a silly shot, it is a lucky one, and the joke stops working.
+            Re-derived so the worst case in the band stays inside its own
+            platform: 82-88 deg at 6-9 gives 14-105 px, against a platform
+            half-width of 90 and a 4-player half-slice of 128. ?selftest=1
+            recomputes both bounds from CONFIG. */
+         sillyElevMinDeg: 82, sillyElevMaxDeg: 88,
+         sillySpeedMin: 6, sillySpeedMax: 9 },
 
   // learning (M4)
   BONUS_CHANCE: 0.5,
@@ -274,6 +464,9 @@ const CONFIG = {
 
   // ui
   BUTTON_DEBOUNCE_MS: 400, FONT_TIMEOUT_MS: 2000,
+  ROUND_INTRO_STEPS: 108,         // 0.6 s beat on ROUND_INTRO
+  ELIM_PUFF_MS: 700,              // the puff an eliminated character leaves with
+  ELIM_WOBBLE_MS: 420,            // and the wobble on the way out, never an injury
 
   // cull bounds (bodies). The arc uses the same box MINUS the top edge —
   // a near-vertical shot legitimately climbs to about y = -43 and comes back,
@@ -287,6 +480,7 @@ const CONFIG = {
 
   // palette
   COLOR: {
+    letterbox: '#1a2555',           // launcher navy — the bars, never the world
     sky0: '#8fd8ff', sky1: '#d9f2ff',
     dirt: '#6b3f1f', grass: '#4caf50',
     wood: '#d9a05b', stone: '#b8b8b8',
@@ -364,18 +558,30 @@ const state = {
 };
 
 /* ========================================================= players =======
-   M1 populates one slot. The shape is the full v1 slot so nothing has to be
-   retrofitted at M2.
+   The slot array. Creation, elimination, scoring. `players` sits ABOVE
+   `physics` in the layering, so nothing here touches a body: loseHeart()
+   reports that a slot died and `turns` is what tells physics to remove the
+   character and render to puff.
+
+   HEARTS ARE THE ONLY HEALTH MODEL, and only the character carries them. The
+   castle is cover and points; destroying it never directly costs a heart.
+   One rule a 4-year-old can state out loud: you lose when your guy falls.
    ======================================================================== */
 const players = {
   list: [],
 
-  reset(n) {
+  /* kinds is an array of 'human' | 'cpu', one per slot — P3: every slot is
+     one or the other and the turn manager treats them identically. The
+     silhouette follows the kind, because that is the only distinction that
+     carries information to a non-reader. */
+  reset(kinds) {
+    const n = kinds.length;
     this.list.length = 0;
     for (let i = 0; i < n; i++) {
       this.list.push({
-        id: i + 1, name: 'PLAYER ' + (i + 1), kind: 'human',
-        characterId: 'nim', color: CONFIG.COLOR.players[i], castleId: i,
+        id: i + 1, name: 'PLAYER ' + (i + 1), kind: kinds[i],
+        characterId: kinds[i] === 'cpu' ? 'bolt' : 'nim',
+        color: CONFIG.COLOR.players[i % CONFIG.COLOR.players.length], castleId: i,
         hearts: (CONFIG.HEARTS[n] || 3), alive: true, score: 0,
         stats: { bestShotDamage: 0, selfHits: 0 },
       });
@@ -383,8 +589,76 @@ const players = {
     return this.list;
   },
 
+  /* Play Again: reset scores, hearts and stats; KEEP the slots. */
+  resetMatch() {
+    const n = this.list.length;
+    for (const p of this.list) {
+      p.hearts = (CONFIG.HEARTS[n] || 3);
+      p.alive = true;
+      p.score = 0;
+      p.stats.bestShotDamage = 0;
+      p.stats.selfHits = 0;
+    }
+    return this.list;
+  },
+
+  byId(id) {
+    for (let i = 0; i < this.list.length; i++) if (this.list[i].id === id) return this.list[i];
+    return null;
+  },
+
   living() { return this.list.filter(p => p.alive); },
+  livingHumans() { return this.list.filter(p => p.alive && p.kind === 'human'); },
+
+  /* Returns true if this took the slot's last heart. hearts === 0 is
+     elimination; culled off-screen is elimination regardless of hearts and
+     goes through eliminate() directly. */
+  loseHeart(p) {
+    if (!p.alive) return false;
+    p.hearts -= 1;
+    if (p.hearts <= 0) { p.hearts = 0; p.alive = false; return true; }
+    return false;
+  },
+
+  eliminate(p) {
+    if (!p.alive) return false;
+    p.hearts = 0;
+    p.alive = false;
+    return true;
+  },
+
+  addScore(p, points) {
+    p.score += points;
+    return p.score;
+  },
+
+  /* Last player standing; points are the tiebreak, ties to the lower id.
+     The tiebreak is what ROUND_MAX resolves on, and it is also the answer in
+     the empty-room case (no living human left). */
+  winner() {
+    const alive = this.living();
+    const pool = alive.length ? alive : this.list;
+    let best = null;
+    for (const p of pool) {
+      if (!best) { best = p; continue; }
+      if (p.score > best.score) best = p;
+      else if (p.score === best.score && p.id < best.id) best = p;
+    }
+    return best;
+  },
 };
+
+/* Slot configuration. The setup screen is M3; until it exists the slots come
+   off the query string — ?slots=hc is one human and one CPU (the default and
+   the Tuesday-afternoon case), ?slots=hh is two humans, ?slots=hccc is the
+   4-player P5 falsification run. Pure, so ?selftest=1 asserts the same rule
+   the M3 setup screen will enforce: 2-4 slots, at least one HUMAN. */
+function parseSlots(raw) {
+  const s = String(raw == null ? '' : raw).toLowerCase().replace(/[^hc]/g, '');
+  if (s.length < 2 || s.length > 4) return null;
+  if (s.indexOf('h') < 0) return null;               // never zero humans
+  return s.split('').map(c => (c === 'h' ? 'human' : 'cpu'));
+}
 
 /* =========================================================== world =======
    Ground and castles are plain descriptors. That is what lets M1's power
@@ -394,10 +668,68 @@ const players = {
    Coordinate convention: +y is DOWN, everywhere, matching Matter.
    ======================================================================== */
 const world = {
-  /* Ground: x, y are the LEFT and TOP edges. M1 is deliberately flat —
-     stepped platforms land at M2, and the MAX_SPEED derivation is only
-     valid while PLATFORM_DY_MAX <= 80. */
+  GROUND_TOP: 700,
+
+  /* Ground: x, y are the LEFT and TOP edges. Index 0 is ALWAYS the base
+     ground that spans the world; anything after it is a stepped platform.
+     Rebuilt by buildGroundPlan() on every physics.build(). */
   groundPlan: [{ x: 0, y: 700, w: 1024, h: 68 }],
+
+  /* Castle i is raised by this much. Alternating, so the skyline steps and a
+     far castle is never fully occluded. The largest delta between any two
+     platforms is therefore exactly PLATFORM_DY, which is the number the
+     MAX_SPEED derivation is bounded by. */
+  platformDy(i) { return (i % 2) * CONFIG.PLATFORM_DY; },
+  platformTopY(i) { return this.GROUND_TOP - this.platformDy(i); },
+
+  /* The largest height difference any shot can be asked to climb. */
+  maxPlatformDelta(n) {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = this.platformDy(i);
+      if (d < lo) lo = d;
+      if (d > hi) hi = d;
+    }
+    return n > 0 ? hi - lo : 0;
+  },
+
+  /* The longest shot the game can require at n players: outermost centre to
+     outermost centre. n = 4 gives 768 px, which is what MAX_SPEED is derived
+     from. */
+  maxSpan(n) {
+    if (n < 2) return 0;
+    const c = this.castleCentres(n);
+    return c[n - 1] - c[0];
+  },
+
+  platformWidth(cols) { return cols * CONFIG.BLOCK.w + 2 * CONFIG.PLATFORM_PAD; },
+
+  buildGroundPlan(n, cols) {
+    const out = [{ x: 0, y: this.GROUND_TOP, w: CONFIG.WORLD_W, h: 68 }];
+    const centres = this.castleCentres(n);
+    const pw = this.platformWidth(cols);
+    for (let i = 0; i < n; i++) {
+      const dy = this.platformDy(i);
+      if (dy <= 0) continue;                        // sits on the base ground
+      out.push({ x: centres[i] - pw / 2, y: this.GROUND_TOP - dy,
+                 w: pw, h: dy + CONFIG.PLATFORM_SKIRT, platform: true });
+    }
+    this.groundPlan = out;
+    return out;
+  },
+
+  /* The minimum launch speed that reaches a target R px away and h px higher
+     (h < 0 for downhill), in Body.setVelocity units. Derived rather than
+     tabulated, so re-verifying MAX_SPEED against a new PLATFORM_DY is one
+     call and not a page of arithmetic:
+
+       R = (v^2/g) * sqrt(1 - 2gh/v^2)   =>   u^2 - 2ghu - g^2 R^2 = 0
+       u = v^2 = g * (h + sqrt(h^2 + R^2))                                  */
+  gravityPerTick() { return CONFIG.GRAVITY_Y * CONFIG.GRAVITY_SCALE * BASE_DELTA * BASE_DELTA; },
+  minSpeedFor(R, h) {
+    const g = this.gravityPerTick();
+    return Math.sqrt(g * (h + Math.hypot(h, R)));
+  },
 
   /* Castle centres are a FORMULA, not a table. Adding a fifth slot is then a
      config change instead of arithmetic someone has to redo. */
@@ -450,11 +782,15 @@ const world = {
     let k = 0;
     for (let gy = 0; gy < rows; gy++) {
       for (let gx = 0; gx < cols; gx++) {
-        out.push({ gx, gy, mat: 'wood', label: labels[k++] });  // stone lands at M2
+        out.push({ gx, gy, mat: this.matFor(gy), label: labels[k++] });
       }
     }
     return out;
   },
+
+  /* Stone foundation, wood above. Identical for every castle, so no slot is
+     handed a tougher tower than another. */
+  matFor(gy) { return gy < CONFIG.STONE_ROWS ? 'stone' : 'wood'; },
 
   blockWorldX(baseLeftX, gx) { return baseLeftX + (gx + 0.5) * CONFIG.BLOCK.w; },
   blockWorldY(platformTopY, gy) { return platformTopY - (gy + 0.5) * CONFIG.BLOCK.h; },
@@ -520,10 +856,17 @@ const physics = {
   },
 
   /* --- build ---------------------------------------------------------- */
+  /* Rows follow the plan's block budget: 12 blocks in 4 rows at 2 players
+     (the generous castle), 9 in 3 rows at 3 and 4, where the slice is
+     narrower and a taller tower would occlude its neighbours. Nine in three
+     rows is the floor at which destruction reads as destruction — a 5-block
+     pile does not come apart, it tips. */
+  rowsFor(playerCount) { return playerCount <= 2 ? 4 : 3; },
+
   build(playerCount, opts) {
     opts = opts || {};
     const cols = opts.cols || 3;
-    const rows = opts.rows || 4;
+    const rows = opts.rows || this.rowsFor(playerCount);
 
     // wipe
     Composite.clear(this.mworld, false, true);
@@ -536,8 +879,9 @@ const physics = {
     this.queue.length = 0;
     this.indexDirty = true;
 
-    // ground from the descriptor (Bodies.rectangle takes a CENTRE)
-    for (const g of world.groundPlan) {
+    /* Ground from the descriptor (Bodies.rectangle takes a CENTRE). Index 0
+       is the base ground; the rest are the stepped platforms. */
+    for (const g of world.buildGroundPlan(playerCount, cols)) {
       const b = Bodies.rectangle(g.x + g.w / 2, g.y + g.h / 2, g.w, g.h, {
         isStatic: true, label: 'ground', friction: 0.9,
       });
@@ -545,13 +889,15 @@ const physics = {
       Composite.add(this.mworld, b);
       this.ground.push(b);
     }
-    const platformTopY = world.groundPlan[0].y;
 
     const centres = world.castleCentres(playerCount);
     for (let ci = 0; ci < centres.length; ci++) {
       const centreX = centres[ci];
+      const platformTopY = world.platformTopY(ci);
       const baseLeftX = centreX - (cols * CONFIG.BLOCK.w) / 2;
-      const castle = { id: ci, centreX, baseLeftX, platformTopY, cols, rows };
+      const halfW = (cols * CONFIG.BLOCK.w) / 2;
+      const castle = { id: ci, centreX, baseLeftX, platformTopY, cols, rows,
+                       footX0: centreX - halfW, footX1: centreX + halfW };
       this.castles.push(castle);
 
       for (const d of world.makeCastlePlan(cols, rows)) {
@@ -585,15 +931,84 @@ const physics = {
           frictionStatic: CONFIG.CHARACTER.frictionStatic,
           restitution: CONFIG.CHARACTER.restitution,
         });
-      const chRec = { body: ch, playerId: ci + 1, castleId: ci, facing: 1 };
+      /* characterIds is passed IN rather than read off `players`: physics
+         sits below players in the layering and must not reach up. */
+      const chRec = { body: ch, playerId: ci + 1, castleId: ci, facing: 1,
+                      characterId: (opts.characterIds && opts.characterIds[ci]) || 'nim',
+                      eliminated: false, turnStartY: ch.position.y };
       ch.charRec = chRec;
       this.characters.push(chRec);
       this.addDynamic(ch);
     }
   },
 
-  castleOf(id) { return this.castles[id]; },
-  blocksOf(id) { return this.blocks.filter(b => b.castleId === id); },
+  charOf(castleId) {
+    for (let i = 0; i < this.characters.length; i++) {
+      if (this.characters[i].castleId === castleId) return this.characters[i];
+    }
+    return null;
+  },
+
+  /* Eliminated characters leave the world. Called by `turns` only — physics
+     never decides that a player is out. */
+  removeCharacter(rec) {
+    if (!rec || rec.eliminated) return;
+    rec.eliminated = true;
+    if (this.dynamicBodies.indexOf(rec.body) >= 0) this.removeDynamic(rec.body);
+  },
+
+  /* --- "standing" ------------------------------------------------------
+     The plan's three-part predicate, and all three parts matter. Without the
+     last one a block lying flat on the ground inside its own slice counts as
+     cover, which skews the CPU's "fewest standing blocks" toward castles that
+     are already flattened and (at M4) lets a bonus target land on rubble. */
+  isStanding(rec) {
+    const cas = this.castles[rec.castleId];
+    if (!cas) return false;
+    const b = rec.body;
+    if (this.dynamicBodies.indexOf(b) < 0) return false;          // destroyed or culled
+    if (b.position.x < cas.footX0 || b.position.x > cas.footX1) return false;
+    const ang = Math.abs(normAngle(b.angle));
+    if (ang >= CONFIG.STANDING_MAX_ANGLE_DEG * Math.PI / 180) return false;
+    return (cas.platformTopY - b.position.y) >= CONFIG.BLOCK.h / 2 - CONFIG.STANDING_SLOP;
+  },
+
+  countStanding(castleId) {
+    let n = 0;
+    for (let i = 0; i < this.blocks.length; i++) {
+      const rec = this.blocks[i];
+      if (rec.castleId === castleId && this.isStanding(rec)) n++;
+    }
+    return n;
+  },
+
+  /* The CPU aims at the LOWEST standing block: toppling from the base is
+     both more effective and more spectacular. Ties to the one nearest the
+     castle centre, so the aim point is stable between turns. */
+  lowestStanding(castleId) {
+    let best = null;
+    const cas = this.castles[castleId];
+    for (let i = 0; i < this.blocks.length; i++) {
+      const rec = this.blocks[i];
+      if (rec.castleId !== castleId || !this.isStanding(rec)) continue;
+      if (!best) { best = rec; continue; }
+      const dy = rec.body.position.y - best.body.position.y;
+      if (dy > 0.5) best = rec;                                    // lower on screen = lower block
+      else if (Math.abs(dy) <= 0.5 &&
+               Math.abs(rec.body.position.x - cas.centreX) <
+               Math.abs(best.body.position.x - cas.centreX)) best = rec;
+    }
+    return best;
+  },
+
+  /* No castle/block accessors here on purpose. M2's CPU and learn modules
+     need "STANDING" blocks, which the plan defines as all three of: the body
+     is still in the world, its centre is still inside its own castle's
+     horizontal slice, AND it is still upright and elevated (|angle| < 30 deg
+     and at least half a block above the platform). A naive
+     blocksOf(castleId) counts rubble lying flat on the ground as cover,
+     which skews CPU target selection toward already-flattened castles and
+     lets a bonus target land on rubble. Write the real predicate at M2. */
 
   /* --- projectile ------------------------------------------------------ */
   spawnProjectile(x, y, vx, vy) {
@@ -812,6 +1227,16 @@ const physics = {
 
 const ZERO = { x: 0, y: 0 };
 
+/* Fold an angle into (-PI, PI]. Blocks start at 0, so this is "how far from
+   its original orientation" without a wrap-around false positive. */
+function normAngle(a) {
+  const TAU = Math.PI * 2;
+  let x = a % TAU;
+  if (x > Math.PI) x -= TAU;
+  if (x <= -Math.PI) x += TAU;
+  return x;
+}
+
 function segmentHitsAABB(x0, y0, x1, y1, b) {
   // slab method
   let t0 = 0, t1 = 1;
@@ -876,6 +1301,30 @@ const aim = {
     this.velY = this.dirY * this.speed;
   },
 
+  /* Set the shot directly, bypassing the drag. This is how the CPU lines up
+     with the same dotted arc a human sees — one preview implementation, not
+     two. dragLen is set to MAX_DRAG so nothing downstream mistakes a bot's
+     shot for a cancelled tap. */
+  setShot(vx, vy, speed) {
+    const len = Math.hypot(vx, vy) || 1;
+    this.velX = vx; this.velY = vy;
+    this.dirX = vx / len; this.dirY = vy / len;
+    this.speed = speed;
+    this.dragLen = this.dragFor(speed);
+    this.dragX = this.dirX * this.dragLen;
+    this.dragY = this.dirY * this.dragLen;
+    this.dirty = false;
+  },
+
+  /* powerCurve inverted. The CPU's drawn pull-back and power ring then show
+     the power it is actually about to use, rather than a full pull on every
+     shot. Note nothing gates a bot's shot on MIN_DRAG — turns.fire() is the
+     primitive and only the POINTER path applies the cancel rule. */
+  dragFor(speed) {
+    const t = clamp((speed - CONFIG.MIN_SPEED) / (CONFIG.MAX_SPEED - CONFIG.MIN_SPEED), 0, 1);
+    return CONFIG.MAX_DRAG * Math.pow(t, 1 / CONFIG.POWER_EXP);
+  },
+
   /* Projectile spawns SPAWN_OFFSET_Y above the character's top edge, so a
      low-power shot clears the shooter's own parapet. */
   launchPoint(chRec) {
@@ -918,7 +1367,7 @@ const aim = {
     }
     for (let i = 0; i < physics.characters.length; i++) {
       const c = physics.characters[i];
-      if (c === ownChar) continue;
+      if (c === ownChar || c.eliminated) continue;
       const bb = c.body.bounds;
       if (x >= bb.min.x && x <= bb.max.x && y >= bb.min.y && y <= bb.max.y) return true;
     }
@@ -941,6 +1390,285 @@ const aim = {
 };
 
 function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+/* ============================================================= cpu =======
+   The bot is a CLOWN, not a rival. Difficulty is aim error, never a damage
+   multiplier — a cannonball that hurts more when the computer throws it is
+   the one thing a 4-year-old would notice and resent. v1 ships EASY only.
+
+   Every function here is pure or read-only over `physics`, and every one
+   takes its randomness as an argument, so ?selftest=1 can drive the whole
+   chain with a seeded generator instead of hoping.
+   ======================================================================== */
+const cpu = {
+  DEG: Math.PI / 180,
+
+  /* Target selection: among LIVING opponents, the one whose castle has the
+     FEWEST standing blocks; ties to nearest. Targeting the weakest is what
+     makes matches end — targeting the healthiest would mean the bot never
+     finishes anyone off, and at 4 players with +/-12 deg of error a match
+     could run past twenty rounds.
+
+     `opponents` is [{ id, castleId, alive }]. Returns the chosen opponent
+     plus the aim point, which is the lowest standing block of that castle,
+     or that opponent's CHARACTER when the castle is gone. A living opponent
+     whose castle is gone is still a valid target; hitting an empty list is
+     the crash this fallback exists to prevent. */
+  chooseTarget(shooterCastleId, opponents, rnd) {
+    const from = physics.castles[shooterCastleId];
+    let best = null, bestN = Infinity, bestD = Infinity, ties = 0;
+    for (const o of opponents) {
+      if (!o.alive || o.castleId === shooterCastleId) continue;
+      const cas = physics.castles[o.castleId];
+      if (!cas) continue;
+      const ch = physics.charOf(o.castleId);
+      if (!ch || ch.eliminated) continue;
+      const n = physics.countStanding(o.castleId);
+      const d = from ? Math.abs(cas.centreX - from.centreX) : cas.centreX;
+      if (n < bestN || (n === bestN && d < bestD - 0.5)) {
+        best = o; bestN = n; bestD = d; ties = 1;
+      } else if (n === bestN && Math.abs(d - bestD) <= 0.5) {
+        /* Fully tied on BOTH keys — same standing count, same distance.
+           Reservoir-pick one at random rather than taking the lowest castle
+           id. At 4 players the two neighbours of a middle castle are exactly
+           equidistant, so index order would send every bot at castle 0 on the
+           opening round, and castle 0 is the human in every ?slots=hc.. run.
+           That is an implementation accident, not the plan's rule. */
+        ties++;
+        if (rnd && rnd() < 1 / ties) { best = o; bestD = d; }
+      }
+    }
+    if (!best) return null;
+
+    const block = physics.lowestStanding(best.castleId);
+    if (block) {
+      return { opponent: best, kind: 'block',
+               x: block.body.position.x, y: block.body.position.y };
+    }
+    const ch = physics.charOf(best.castleId);
+    return { opponent: best, kind: 'character',
+             x: ch.body.position.x, y: ch.body.position.y };
+  },
+
+  /* Ballistic solve, in Body.setVelocity units (px per BASE_DELTA).
+       tan(theta) = (v^2 +/- sqrt(v^4 - g(g R^2 + 2 h v^2))) / (g R)
+     Returns { lo, hi } elevation angles in radians above the horizontal, or
+     null when the target is out of range at that speed. `h` is the height
+     GAIN, so positive means the target is above the launch point — remember
+     +y is DOWN everywhere else in this file. */
+  solveAngles(R, h, v) {
+    const g = world.gravityPerTick();
+    if (R <= 0.0001) return null;
+    const v2 = v * v;
+    const disc = v2 * v2 - g * (g * R * R + 2 * h * v2);
+    if (disc < 0) return null;
+    const root = Math.sqrt(disc);
+    return { lo: Math.atan2(v2 - root, g * R), hi: Math.atan2(v2 + root, g * R) };
+  },
+
+  /* Where a shot fired at this angle actually crosses the target's height on
+     the way DOWN, using the engine's own integrator rather than the
+     continuous formula the angle came out of. Matter's Body.update is
+     position-Verlet, so the closed form is p0 + u*n + a*n(n+1)/2 and the two
+     disagree by a few px over a long flight. Returns null if it never gets
+     there. */
+  landingX(x0, y0, v, theta, dirSign, targetY, maxSteps) {
+    const vx = Math.cos(theta) * v * dirSign;
+    const vy = -Math.sin(theta) * v;
+    let prevX = x0, prevY = y0, hit = null;
+    aim.integrate(x0, y0, vx, vy, maxSteps || CONFIG.ARC_MAX_STEPS, (x, y) => {
+      if (y >= targetY && prevY < targetY) {
+        const t = (targetY - prevY) / (y - prevY);
+        hit = prevX + (x - prevX) * t;
+        return false;
+      }
+      prevX = x; prevY = y;
+      return !aim.arcOut(x, y);
+    });
+    return hit;
+  },
+
+  /* One secant correction against the real integrator. The analytic angle is
+     already within a few px; this removes the position-Verlet offset so the
+     bot's aim is honest before the error is injected on top of it. */
+  refine(x0, y0, v, theta, dirSign, target) {
+    const targetX = target.x, targetY = target.y;
+    const want = Math.abs(targetX - x0);
+    const a = this.landingX(x0, y0, v, theta, dirSign, targetY);
+    if (a === null) return theta;
+    const eps = 0.5 * this.DEG;
+    const b = this.landingX(x0, y0, v, theta + eps, dirSign, targetY);
+    if (b === null) return theta;
+    const da = Math.abs(a - x0) - want;
+    const db = Math.abs(b - x0) - want;
+    const slope = (db - da) / eps;
+    if (!isFinite(slope) || Math.abs(slope) < 1e-6) return theta;
+    let next = theta - da / slope;
+    const cap = 10 * this.DEG;
+    if (next > theta + cap) next = theta + cap;
+    if (next < theta - cap) next = theta - cap;
+    if (next <= 0.5 * this.DEG || next >= 89.5 * this.DEG) return theta;
+    return next;
+  },
+
+  /* aim.blocked() with one castle excluded. The CPU aims at the LOWEST
+     standing block, and any arc that reaches it has to pass through the
+     blocks stacked on top of it — so the target's own castle cannot count as
+     an obstruction or every good shot reads as blocked. Everything else
+     does, including the shooter's own parapet. */
+  blockedIgnoring(x, y, ownChar, ignoreCastleId) {
+    const cands = physics.candidatesAt(x);
+    for (let i = 0; i < cands.length; i++) {
+      const body = cands[i];
+      if (body.brick && body.brick.castleId === ignoreCastleId) continue;
+      const bb = body.bounds;
+      if (x >= bb.min.x && x <= bb.max.x && y >= bb.min.y && y <= bb.max.y) return true;
+    }
+    for (let i = 0; i < physics.characters.length; i++) {
+      const c = physics.characters[i];
+      if (c === ownChar || c.eliminated || c.castleId === ignoreCastleId) continue;
+      const bb = c.body.bounds;
+      if (x >= bb.min.x && x <= bb.max.x && y >= bb.min.y && y <= bb.max.y) return true;
+    }
+    return false;
+  },
+
+  /* Is something IN THE WAY — an intervening castle — before the shot gets
+     where it is going? Reaching the aim point is clean. Sailing out of the
+     world without touching anything is a miss, not an obstruction, and the
+     fallback chain cannot fix a miss. */
+  obstructed(x0, y0, vx, vy, ownChar, target) {
+    const ignore = target.opponent ? target.opponent.castleId : -1;
+    const tol = CONFIG.CPU.blockTolPx;
+    let blockedEarly = false;
+    aim.integrate(x0, y0, vx, vy, CONFIG.ARC_MAX_STEPS, (x, y, step) => {
+      if (Math.hypot(x - target.x, y - target.y) <= tol) return false;   // arrived
+      if (aim.arcOut(x, y)) return false;                                // just a miss
+      if (step > CONFIG.SPAWN_GRACE_STEPS && this.blockedIgnoring(x, y, ownChar, ignore)) {
+        blockedEarly = true;
+        return false;
+      }
+      return true;
+    });
+    return blockedEarly;
+  },
+
+  /* Solve a shot from `from` to `target`. Prefers the HIGH arc — the lobbier
+     of the two solutions clears an intervening castle far more often, and it
+     is the one that looks like the bot is trying. Returns null when the
+     target is out of range at MAX_SPEED. */
+  aimAt(from, target) {
+    const dx = target.x - from.x;
+    const R = Math.abs(dx);
+    const dirSign = dx >= 0 ? 1 : -1;
+    const h = from.y - target.y;                     // +y is DOWN, so this is height GAIN
+    const vMin = world.minSpeedFor(R, h);
+    if (!isFinite(vMin) || vMin > CONFIG.MAX_SPEED) return null;
+    const v = clamp(vMin * CONFIG.CPU.solveMargin, CONFIG.MIN_SPEED, CONFIG.MAX_SPEED);
+    const sol = this.solveAngles(R, h, v);
+    if (!sol) return null;
+    return { v, dirSign, lo: sol.lo, hi: sol.hi };
+  },
+
+  toVelocity(v, theta, dirSign) {
+    return { vx: Math.cos(theta) * v * dirSign, vy: -Math.sin(theta) * v, speed: v };
+  },
+
+  /* Angle error +/- angleErrDeg, power jitter +/- powerJitter. Shaped as
+     config so medium (+/-6 deg / +/-4%) and hard (+/-2 deg / +/-1%) are a
+     data change, not a code change, if a human ever asks for them. */
+  applyError(shot, rnd) {
+    const cfg = CONFIG.CPU;
+    const ang = Math.atan2(shot.vy, shot.vx) + (rnd() * 2 - 1) * cfg.angleErrDeg * this.DEG;
+    const spd = clamp(shot.speed * (1 + (rnd() * 2 - 1) * cfg.powerJitter),
+                      CONFIG.MIN_SPEED, CONFIG.MAX_SPEED);
+    return { vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, speed: spd, silly: !!shot.silly };
+  },
+
+  /* The silly shot. Near-vertical, low-to-mid power, tipped very slightly
+     toward whoever it was supposedly aiming at, so it reads as a failed
+     attempt rather than a bug. NOT error-injected afterwards — it is already
+     deliberate, and 12 degrees of wobble on top could turn it into a hit. */
+  sillyShot(dirSign, rnd) {
+    const cfg = CONFIG.CPU;
+    const elev = (cfg.sillyElevMinDeg + rnd() * (cfg.sillyElevMaxDeg - cfg.sillyElevMinDeg)) * this.DEG;
+    const v = cfg.sillySpeedMin + rnd() * (cfg.sillySpeedMax - cfg.sillySpeedMin);
+    return { vx: Math.cos(elev) * v * dirSign, vy: -Math.sin(elev) * v, speed: v, silly: true };
+  },
+
+  /* The whole chain. NEVER returns null for a living shooter — a skipped
+     turn would strand the round manager. Fallbacks, in the plan's order:
+       (a) retarget to the nearest living opponent
+       (b) fire at max power at 45 degrees toward the target                */
+  decide(shooterCastleId, opponents, rnd) {
+    rnd = rnd || Math.random;
+    const ch = physics.charOf(shooterCastleId);
+    if (!ch || ch.eliminated) return null;
+    const from = aim.launchPoint(ch);
+
+    const target = this.chooseTarget(shooterCastleId, opponents, rnd);
+    if (!target) return null;                        // no living opponent: the match is over
+
+    const dirSign = target.x - from.x >= 0 ? 1 : -1;
+
+    if (rnd() < CONFIG.CPU.sillyShotChance) {
+      const shot = this.sillyShot(dirSign, rnd);
+      return { shot, target, reason: 'silly' };
+    }
+
+    const candidates = [target];
+    const near = this.nearestOpponentTarget(shooterCastleId, opponents, from, target);
+    if (near) candidates.push(near);                 // fallback (a)
+
+    for (let i = 0; i < candidates.length; i++) {
+      const t = candidates[i];
+      const sol = this.aimAt(from, t);
+      if (!sol) continue;
+      for (const which of ['hi', 'lo']) {
+        const theta = this.refine(from.x, from.y, sol.v, sol[which], sol.dirSign, t);
+        const shot = this.toVelocity(sol.v, theta, sol.dirSign);
+        if (this.obstructed(from.x, from.y, shot.vx, shot.vy, ch, t)) continue;
+        return { shot: this.applyError(shot, rnd), target: t,
+                 reason: i === 0 ? which : 'retarget-' + which };
+      }
+    }
+
+    // (b) Never a skipped turn.
+    const shot = this.toVelocity(CONFIG.MAX_SPEED, 45 * this.DEG, dirSign);
+    return { shot: this.applyError(shot, rnd), target, reason: 'fallback45' };
+  },
+
+  nearestOpponentTarget(shooterCastleId, opponents, from, exclude) {
+    let best = null, bestD = Infinity;
+    for (const o of opponents) {
+      if (!o.alive || o.castleId === shooterCastleId) continue;
+      if (exclude && exclude.opponent && o.castleId === exclude.opponent.castleId) continue;
+      const cas = physics.castles[o.castleId];
+      const c = physics.charOf(o.castleId);
+      if (!cas || !c || c.eliminated) continue;
+      const d = Math.abs(cas.centreX - from.x);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    if (!best) return null;
+    const block = physics.lowestStanding(best.castleId);
+    if (block) return { opponent: best, kind: 'block', x: block.body.position.x, y: block.body.position.y };
+    const c = physics.charOf(best.castleId);
+    return { opponent: best, kind: 'character', x: c.body.position.x, y: c.body.position.y };
+  },
+};
+
+/* Deterministic PRNG, for ?selftest=1 only. Math.random cannot answer "does
+   the silly shot fire 12% of the time" reproducibly. */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /* =========================================================== audio =======
    Synthesized, never downloaded. Every entry point is guarded: an
@@ -1036,19 +1764,48 @@ const audio = {
 };
 
 /* =========================================================== turns =======
-   The ONLY module that calls setState(). M1 runs one slot cycling
-   PLAYER_TURN <-> TURN_RESULT.
+   The ONLY module that calls setState(), and the only one that mutates a
+   player slot. Turn manager, round manager, turn-end detection, the guard
+   order out of TURN_RESULT, and the CPU turn driver.
+
+   Every turn-lifecycle and health decision below routes through `turnRules`
+   or `playerRules`, which is what ?selftest=1 asserts. Do not reimplement
+   those predicates inline.
    ======================================================================== */
 const turns = {
-  cur: 0,
+  cur: 0,            // index into players.list (== castleId)
+  round: 0,
+  order: [],         // player ids, fixed for the match
+  orderIdx: -1,      // position of `cur` inside order
   shotFired: false,
   turnSteps: 0,      // accumulated fixed steps SINCE FIRING
   calmSteps: 0,
   resultSteps: 0,
-  lastFireAt: 0,
+  introSteps: 0,
   idleSinceMs: 0,
   forcedEnds: 0,     // turns that ended via the TURN_MAX_STEPS backstop
   shots: 0,
+  winnerId: null,
+  pendingIdx: 0,     // who PASS_DEVICE is waiting on
+  /* ?perf=1 is a stress RIG, not a match: one slot, cycling forever, no
+     hearts and no elimination. Without this the single slot is the last
+     player standing after its first shot and the rig ends instantly. */
+  stressLoop: false,
+
+  // CPU turn driver. Counted in SIMULATED steps, not wall clock, for the same
+  // reason TURN_MAX_STEPS is: steps do not advance while PAUSED.
+  cpuPhase: null,    // null | 'think' | 'aim'
+  cpuSteps: 0,
+  cpuShot: null,
+
+  // Per-turn damage bookkeeping, resolved once at turn end.
+  hitChars: [],      // playerIds struck by this turn's projectile
+  shotPoints: 0,     // points this shot has earned, for stats.bestShotDamage
+  shotSelfHit: false,
+
+  /* Debug surface for /qa and the M2 exit gate ("every player gets exactly
+     one turn per round"). Bounded, written once per turn, never per frame. */
+  turnLog: [],
 
   setState(next) {
     state.curState = next;
@@ -1056,54 +1813,144 @@ const turns = {
       /* Cleared ONLY when no projectile is in flight. That clause is
          load-bearing: pausing mid-flight and resuming re-enters PLAYER_TURN,
          and without it the lock would clear while the shot was still
-         travelling and the player could fire twice in one turn. */
-      state.inputLocked = (physics.projectile !== null);
+         travelling and the player could fire twice in one turn.
+
+         The second clause is M2: a CPU turn is input-locked for its whole
+         duration, because P3 says the turn manager treats both kinds
+         identically and the human must not be able to fire the bot's shot. */
+      const p = this.activePlayer();
+      state.inputLocked = (physics.projectile !== null) || !p || p.kind !== 'human';
     } else {
       state.inputLocked = true;
     }
+    if (next !== STATES.PLAYER_TURN) this.cancelAim();
   },
 
-  activeChar() { return physics.characters[this.cur] || null; },
+  /* Any in-progress drag dies when we leave PLAYER_TURN. Without this a
+     finger still down when the turn ends keeps aim.active set, and the arc
+     is drawn over the pass-device screen. */
+  cancelAim() {
+    aim.active = false;
+    aim.pointerId = null;
+    aim.arcN = 0;
+  },
+
+  activeChar() { return physics.charOf(this.cur); },
   activePlayer() { return players.list[this.cur] || null; },
+
+  /* ---- match / round ------------------------------------------------- */
+
+  /* Round order is fixed for the whole match and snapshotted here, so
+     eliminating a player mid-round cannot reshuffle who is still owed a
+     turn. Living players are picked out of it; the dead are skipped. */
+  startMatch() {
+    this.round = 0;
+    this.winnerId = null;
+    this.order = players.list.map(p => p.id);
+    this.turnLog.length = 0;
+    this.beginRound();
+  },
+
+  beginRound() {
+    this.round += 1;
+    this.orderIdx = -1;
+    this.introSteps = 0;
+    this.setState(STATES.ROUND_INTRO);
+  },
+
+  /* ROUND_INTRO branches on the SAME human/CPU test as TURN_RESULT, and it
+     has to. Round rollover leaves TURN_RESULT via ROUND_COMPLETE, bypassing
+     the pass-device guard entirely; without this branch a 2-human match ends
+     round N on Player 2's turn and opens round N+1 on Player 1's turn while
+     Player 2 is still holding the tablet. */
+  endIntro() {
+    const first = this.firstLivingInOrder();
+    if (!first) { this.finish(); return; }
+    this.pendingIdx = first.idx;
+    if (turnRules.afterIntro(first.player.kind, players.livingHumans().length) === STATES.PASS_DEVICE) {
+      this.setState(STATES.PASS_DEVICE);
+    } else {
+      this.beginTurn(first.idx);
+    }
+  },
+
+  firstLivingInOrder() {
+    for (let k = 0; k < this.order.length; k++) {
+      const p = players.byId(this.order[k]);
+      if (p && p.alive) return { player: p, idx: players.list.indexOf(p), orderIdx: k };
+    }
+    return null;
+  },
+
+  /* The next living player AFTER the current position in the round order.
+     null means every living player has had their turn this round. */
+  nextLivingInOrder() {
+    for (let k = this.orderIdx + 1; k < this.order.length; k++) {
+      const p = players.byId(this.order[k]);
+      if (p && p.alive) return { player: p, idx: players.list.indexOf(p), orderIdx: k };
+    }
+    return null;
+  },
 
   beginTurn(idx) {
     this.cur = idx;
+    const me = players.list[idx];
+    this.orderIdx = this.order.indexOf(me.id);
     this.shotFired = false;
     this.turnSteps = 0;
     this.calmSteps = 0;
     this.resultSteps = 0;
     this.idleSinceMs = performance.now();
-    this.restandIfFallen(idx);
+    this.hitChars.length = 0;
+    this.shotPoints = 0;
+    this.shotSelfHit = false;
+    this.cpuShot = null;
+    this.cpuSteps = 0;
+    this.cpuPhase = me.kind === 'cpu' ? 'think' : null;
+
+    /* The fall check at turn end measures against where each character was
+       standing when the turn began, so record it for ALL of them, not just
+       the shooter — anyone can be toppled by anyone's shot. */
+    for (const ch of physics.characters) {
+      if (!ch.eliminated) ch.turnStartY = ch.body.position.y;
+    }
+
     physics.indexDirty = true;
-    aim.active = false;
-    aim.arcN = 0;
+    if (this.turnLog.length < 400) this.turnLog.push({ round: this.round, id: me.id });
     this.setState(STATES.PLAYER_TURN);
   },
 
-  /* M1: a character that has fallen off (or off the world) is stood back up
-     on whatever remains of its castle so the loop stays playable.
-     The heart cost for falling is M2 — see the plan's Health section. */
-  restandIfFallen(idx) {
-    const ch = physics.characters[idx];
-    if (!ch) return;
-    const cas = physics.castles[ch.castleId];
-    const b = ch.body;
-    const gone = physics.dynamicBodies.indexOf(b) < 0;
-    const slice = { x0: cas.centreX - (cas.cols * CONFIG.BLOCK.w) / 2 - CONFIG.BLOCK.w,
-                    x1: cas.centreX + (cas.cols * CONFIG.BLOCK.w) / 2 + CONFIG.BLOCK.w };
-    const fell = b.position.y > cas.platformTopY + 120 ||
-                 b.position.x < slice.x0 || b.position.x > slice.x1;
-    if (!gone && !fell && Math.abs(b.angle) < 1.0) return;
+  /* ---- firing ---------------------------------------------------------- */
 
-    const topY = physics.standingTopY(ch.castleId);
-    Body.setPosition(b, { x: cas.centreX, y: topY - CONFIG.CHARACTER.h / 2 - 1 });
-    Body.setAngle(b, 0);
-    Body.setVelocity(b, ZERO);
-    Body.setAngularVelocity(b, 0);
-    if (gone) physics.addDynamic(b);
+  /* The one place a projectile is ever spawned. Guarded by shotFired, which
+     is what makes a turn exactly one shot for humans and bots alike.
+
+     Note this does NOT check inputLocked: a CPU turn is locked for its whole
+     duration by design and still has to fire. The pointer path keeps that
+     guard — see fireShot() — so there is still exactly one route from a
+     finger to a projectile, and it is still closed while the lock is set. */
+  fire(vx, vy, speed) {
+    if (state.curState !== STATES.PLAYER_TURN) return false;
+    if (this.shotFired) return false;
+    const ch = this.activeChar();
+    if (!ch || ch.eliminated) return false;
+
+    const p = aim.launchPoint(ch);
+    physics.spawnProjectile(p.x, p.y, vx, vy);
+    ch.facing = vx >= 0 ? 1 : -1;
+
+    this.shotFired = true;
+    this.turnSteps = 0;
+    this.calmSteps = 0;
+    this.shots++;
+    state.inputLocked = true;
+    this.cancelAim();
+    audio.launch(speed);
+    return true;
   },
 
-  /* The single fire path. A no-op unless we are in PLAYER_TURN and unlocked. */
+  /* The single POINTER fire path. A no-op unless we are in PLAYER_TURN and
+     unlocked. */
   fireShot() {
     if (state.curState !== STATES.PLAYER_TURN || state.inputLocked) return false;
     if (this.shotFired) return false;
@@ -1112,20 +1959,78 @@ const turns = {
 
     aim.update();
     if (!aim.shouldFire(aim.dragLen)) return false;   // cancel, turn not consumed
+    return this.fire(aim.velX, aim.velY, aim.speed);
+  },
 
-    const p = aim.launchPoint(ch);
-    physics.spawnProjectile(p.x, p.y, aim.velX, aim.velY);
-    ch.facing = aim.dirX >= 0 ? 1 : -1;
+  /* ---- the CPU turn ---------------------------------------------------- */
+  cpuTick(stepsThisFrame) {
+    const me = this.activePlayer();
+    if (!me || me.kind !== 'cpu' || this.shotFired || !this.cpuPhase) return;
+    this.cpuSteps += stepsThisFrame;
 
-    this.shotFired = true;
-    this.turnSteps = 0;
-    this.calmSteps = 0;
-    this.shots++;
-    state.inputLocked = true;
-    aim.active = false;
-    aim.arcN = 0;
-    audio.launch(aim.speed);
-    return true;
+    if (this.cpuPhase === 'think') {
+      if (this.cpuSteps * CONFIG.STEP_MS < CONFIG.CPU.thinkMs) return;
+      const decision = cpu.decide(me.castleId, players.list.map(p => ({
+        id: p.id, castleId: p.castleId, alive: p.alive,
+      })));
+      if (!decision) { this.endTurn(); return; }     // no living opponent left
+      this.cpuShot = decision;
+      /* Line up using the same dotted arc a human sees. The kid gets to
+         watch the bot aim and miss. */
+      const ch = this.activeChar();
+      aim.setShot(decision.shot.vx, decision.shot.vy, decision.shot.speed);
+      if (ch) aim.rebuildArc(ch);
+      aim.active = true;
+      this.cpuPhase = 'aim';
+      this.cpuSteps = 0;
+      return;
+    }
+
+    if (this.cpuPhase === 'aim') {
+      if (this.cpuSteps * CONFIG.STEP_MS < CONFIG.CPU.aimMs) return;
+      const shot = this.cpuShot.shot;
+      this.cpuPhase = null;
+      /* If the shot is refused — the only way that can happen is the bot's own
+         character being culled off the world by a tower still settling from the
+         previous turn — end the turn rather than sitting in PLAYER_TURN with
+         cpuPhase cleared and shotFired false, which is a soft lock with no
+         backstop: TURN_MAX_STEPS only counts once a shot has been fired. */
+      if (!this.fire(shot.vx, shot.vy, shot.speed)) this.endTurn();
+    }
+  },
+
+  /* ---- scoring and damage --------------------------------------------- */
+
+  /* Points, with the reason, per the plan's table. Tracked at M2 so the
+     ROUND_MAX tiebreak is real; the floating labels and the HUD that show
+     them are M3. Hitting your OWN castle or character scores 0 — never
+     negative. */
+  scoreFor(e) {
+    const S = CONFIG.SCORE;
+    if (e.type === 'blockHit') {
+      if (!e.destroyed) return S.blockHit;
+      return e.rec.mat === 'stone' ? S.stoneKill : S.woodKill;
+    }
+    if (e.type === 'charHit') return S.charHit;
+    if (e.type === 'knockout') return S.knockout;
+    return 0;
+  },
+
+  award(e, ownCastle) {
+    const me = this.activePlayer();
+    if (!me) return;
+    if (ownCastle) {
+      /* 0 OOPS!, never negative. The physics are still real: a self-hit
+         costs a heart exactly as an opponent's would, which is the only
+         reason the CPU silly shot is funny. */
+      if (!this.shotSelfHit) { this.shotSelfHit = true; me.stats.selfHits += 1; }
+      return;
+    }
+    const pts = this.scoreFor(e);
+    if (pts <= 0) return;
+    players.addScore(me, pts);
+    this.shotPoints += pts;
+    if (this.shotPoints > me.stats.bestShotDamage) me.stats.bestShotDamage = this.shotPoints;
   },
 
   /* Drain what physics recorded and decide who gets told. */
@@ -1136,15 +2041,99 @@ const turns = {
       if (e.type === 'blockHit') {
         audio.boom(e.impact);
         render.shake(clamp(e.impact / 12, 2, 10));
+        this.award(e, e.rec.castleId === this.cur);
       } else if (e.type === 'charHit') {
         audio.boom(e.impact);
         render.shake(8);
+        const isSelf = e.rec.castleId === this.cur;
+        if (this.hitChars.indexOf(e.rec.playerId) < 0) this.hitChars.push(e.rec.playerId);
+        this.award(e, isSelf);
+      } else if (e.type === 'charCulled') {
+        /* Culled off-screen entirely: immediate elimination, regardless of
+           hearts. */
+        const p = this.stressLoop ? null : players.byId(e.rec.playerId);
+        if (p && p.alive) {
+          players.eliminate(p);
+          this.onEliminated(p, e.rec);
+        }
       } else if (e.type === 'tap') {
         audio.thunk();
       }
     }
     q.length = 0;
   },
+
+  onEliminated(p, chRec) {
+    physics.removeCharacter(chRec);
+    render.puff(chRec.body.position.x, chRec.body.position.y, p.color, chRec);
+    /* No `killer.alive` clause: a shot that eliminates an opponent AND the
+       shooter still earned the knockout, and resolveTurn's iteration order
+       must not decide whether it counts. */
+    const killer = this.activePlayer();
+    if (killer && killer.id !== p.id) {
+      players.addScore(killer, CONFIG.SCORE.knockout);
+      this.shotPoints += CONFIG.SCORE.knockout;
+      if (this.shotPoints > killer.stats.bestShotDamage) {
+        killer.stats.bestShotDamage = this.shotPoints;
+      }
+    }
+  },
+
+  /* Everything that costs a heart is settled ONCE, here, at turn end.
+     Per character per turn, at most one heart from (struck by the projectile
+     OR fell) — they do not stack. Being culled off the world is separate and
+     immediate, and is handled in drain(). */
+  resolveTurn(costHearts) {
+    for (const ch of physics.characters) {
+      if (ch.eliminated) continue;
+      const p = players.byId(ch.playerId);
+      if (!p || !p.alive) continue;
+
+      const fell = this.hasFallen(ch);
+      if (fell) this.restand(ch);
+      if (!costHearts) continue;
+
+      const lost = playerRules.heartsLostThisTurn(this.hitChars.indexOf(p.id) >= 0, fell);
+      if (lost <= 0) continue;
+      if (players.loseHeart(p)) this.onEliminated(p, ch);
+    }
+  },
+
+  /* Did this character fall? Measured against where it was STANDING when the
+     turn began — see CONFIG.FALL_DY for why the plan's "below its platform's
+     top surface" cannot be taken literally. Being knocked over in place is
+     not a fall: it is stood back up for free. */
+  hasFallen(ch) {
+    const cas = physics.castles[ch.castleId];
+    if (!cas) return false;
+    const b = ch.body;
+    if (physics.dynamicBodies.indexOf(b) < 0) return true;      // body already gone
+    return playerRules.fell(b.position.y - ch.turnStartY, b.position.x, cas.footX0, cas.footX1);
+  },
+
+  /* Stood back up on whatever remains of its castle, or on the bare platform
+     if the castle is gone. Also used for a character that is merely lying on
+     its back, which costs nothing. */
+  restand(ch) {
+    const cas = physics.castles[ch.castleId];
+    const b = ch.body;
+    const gone = physics.dynamicBodies.indexOf(b) < 0;
+    const topY = physics.standingTopY(ch.castleId);
+    Body.setPosition(b, { x: cas.centreX, y: topY - CONFIG.CHARACTER.h / 2 - 1 });
+    Body.setAngle(b, 0);
+    Body.setVelocity(b, ZERO);
+    Body.setAngularVelocity(b, 0);
+    if (gone && !ch.eliminated) physics.addDynamic(b);
+  },
+
+  restandIfToppled() {
+    for (const ch of physics.characters) {
+      if (ch.eliminated) continue;
+      if (Math.abs(normAngle(ch.body.angle)) > 1.0) this.restand(ch);
+    }
+  },
+
+  /* ---- the frame ------------------------------------------------------- */
 
   /* Turn-end evaluation runs ONCE PER RENDERED FRAME, not once per physics
      step. The fixed step runs at 180 Hz; SETTLE_STEPS = 20 is 111 ms of
@@ -1153,42 +2142,142 @@ const turns = {
   frame(stepsThisFrame) {
     this.drain();
 
-    if (state.curState === STATES.PLAYER_TURN) {
-      if (!this.shotFired) return;
+    if (state.curState === STATES.ROUND_INTRO) {
+      this.introSteps += stepsThisFrame;
+      if (this.introSteps >= CONFIG.ROUND_INTRO_STEPS) this.endIntro();
+      return;
+    }
 
-      // 4. Backstop, first so it always wins.
-      if (this.turnSteps >= CONFIG.TURN_MAX_STEPS) {
+    if (state.curState === STATES.PLAYER_TURN) {
+      if (!this.shotFired) { this.cpuTick(stepsThisFrame); return; }
+
+      /* Every decision below routes through `turnRules`, which is what
+         ?selftest=1 asserts. Do not reimplement these predicates inline: an
+         earlier draft did, and the six turn-lifecycle assertions were then
+         testing a parallel copy the game never ran, so breaking precondition
+         1 here would have left the harness green. */
+
+      // 4. Backstop, evaluated first so it always wins.
+      if (turnRules.forceEnd(this.turnSteps)) {
         physics.forceQuiet();
         this.forcedEnds++;
-        this.setState(STATES.TURN_RESULT);
-        this.resultSteps = 0;
+        this.endTurn();
         return;
       }
-      // 1. The projectile must be gone. A turn cannot end while it is a body.
-      if (physics.projectile) { this.calmSteps = 0; return; }
-      // 2. No damage-registering collision in the last QUIET_AFTER_IMPACT_STEPS.
-      if (physics.stepCount - physics.lastImpactStep < CONFIG.QUIET_AFTER_IMPACT_STEPS) {
-        this.calmSteps = 0; return;
-      }
-      // 3. Coarse calm for SETTLE_STEPS consecutive steps.
-      this.calmSteps = physics.worldIsCalm() ? this.calmSteps + stepsThisFrame : 0;
-      if (this.calmSteps >= CONFIG.SETTLE_STEPS) {
-        this.setState(STATES.TURN_RESULT);
-        this.resultSteps = 0;
-      }
+
+      const hasProjectile = physics.projectile !== null;
+      const sinceImpact = physics.stepCount - physics.lastImpactStep;
+
+      /* Preconditions 1 and 2 also reset the calm counter: nothing counts as
+         settled while a body is still in flight or a tower is mid-collapse. */
+      const blocked = hasProjectile || sinceImpact < CONFIG.QUIET_AFTER_IMPACT_STEPS;
+      this.calmSteps = blocked
+        ? 0
+        : turnRules.settleTick(this.calmSteps, physics.worldIsCalm(), stepsThisFrame);
+
+      // 1 + 2 + 3, in one predicate.
+      if (turnRules.canEndTurn(hasProjectile, sinceImpact, this.calmSteps)) this.endTurn();
       return;
     }
 
     if (state.curState === STATES.TURN_RESULT) {
       this.resultSteps += stepsThisFrame;
-      if (this.resultSteps >= CONFIG.TURN_RESULT_STEPS) {
-        /* M1 runs one slot, so "the next living player" is the same player.
-           The loop itself is what M1 has to certify: without it the input
-           lock never clears and the player gets exactly one shot ever. */
-        const n = players.list.length;
-        this.beginTurn((this.cur + 1) % n);
-      }
+      if (this.resultSteps >= CONFIG.TURN_RESULT_STEPS) this.advance();
+      return;
     }
+
+    if (state.curState === STATES.ROUND_COMPLETE) {
+      if (turnRules.afterRound(this.round) === STATES.FINAL_RESULTS) this.finish();
+      else this.beginRound();
+      return;
+    }
+  },
+
+  /* The one exit from PLAYER_TURN. There is no other way out.
+     Every heart, every elimination and the fall check are settled here,
+     before any guard looks at who is still alive. */
+  endTurn() {
+    physics.removeProjectile();
+    this.resolveTurn(!this.stressLoop);
+    this.restandIfToppled();
+    this.setState(STATES.TURN_RESULT);
+    this.resultSteps = 0;
+  },
+
+  /* The guard order out of TURN_RESULT. Evaluated top to bottom, first match
+     wins, and the order is the point: the end-of-match checks fire HERE and
+     not at ROUND_COMPLETE. If the only human is knocked out on the first turn
+     of a round in a 1-human/3-CPU match, an end-of-round check would let
+     three bots take their turns first — an empty room watching itself play. */
+  advance() {
+    if (this.stressLoop) { this.beginTurn(0); return; }
+    const next = this.nextLivingInOrder();
+    const decision = turnRules.nextState({
+      aliveCount: players.living().length,
+      livingHumans: players.livingHumans().length,
+      nextKind: next ? next.player.kind : null,
+    });
+
+    if (decision === STATES.FINAL_RESULTS) { this.finish(); return; }
+    if (decision === STATES.ROUND_COMPLETE || !next) {
+      /* `!next` is unreachable while nextState maps a null nextKind to
+         ROUND_COMPLETE, and it is here anyway: dereferencing next.idx would
+         throw inside the rAF loop and take the whole game with it, which is
+         strictly worse than rolling the round over. */
+      this.setState(STATES.ROUND_COMPLETE);
+      return;
+    }
+
+    this.pendingIdx = next.idx;
+    if (decision === STATES.PASS_DEVICE) this.setState(STATES.PASS_DEVICE);
+    else this.beginTurn(next.idx);
+  },
+
+  /* "I'M READY" on the pass-device screen. The only way out of PASS_DEVICE. */
+  ready() {
+    if (state.curState !== STATES.PASS_DEVICE) return false;
+    /* Physics keeps stepping behind the pass screen, so a tower can still be
+       settling and a character can still be culled off the world while the
+       tablet is being handed over. Re-run the guards rather than starting a
+       turn for a player who is no longer in the match. */
+    const p = players.list[this.pendingIdx];
+    if (!p || !p.alive) { this.advance(); return true; }
+    this.beginTurn(this.pendingIdx);
+    return true;
+  },
+
+  pause() {
+    if (state.curState !== STATES.PLAYER_TURN) return false;
+    this.setState(STATES.PAUSED);
+    return true;
+  },
+
+  resume() {
+    if (state.curState !== STATES.PAUSED) return false;
+    /* Re-enters PLAYER_TURN, which is exactly why setState's in-flight clause
+       exists: the lock must NOT clear while the paused shot is still
+       travelling. */
+    this.setState(STATES.PLAYER_TURN);
+    this.idleSinceMs = performance.now();
+    return true;
+  },
+
+  finish() {
+    const w = players.winner();
+    this.winnerId = w ? w.id : null;
+    this.setState(STATES.FINAL_RESULTS);
+  },
+
+  /* Play Again: reset scores, hearts and castles; KEEP the slots.
+     New Game and Home need the setup and home screens, so they are M3. */
+  playAgain() {
+    if (state.curState !== STATES.FINAL_RESULTS) return false;
+    players.resetMatch();
+    physics.build(players.list.length,
+                  { characterIds: players.list.map(p => p.characterId) });
+    render.clearPuffs();
+    this.startMatch();
+    return true;
   },
 
   step() { if (this.shotFired) this.turnSteps++; },
@@ -1204,8 +2293,83 @@ const turnRules = {
   canEndTurn(hasProjectile, stepsSinceImpact, calmSteps) {
     if (hasProjectile) return false;
     if (stepsSinceImpact < CONFIG.QUIET_AFTER_IMPACT_STEPS) return false;
-    return calmSteps >= CONFIG.SETTLE_STEPS;
+    return this.isSettled(calmSteps);
   },
+
+  /* The TURN_RESULT guard table, in the plan's order. Top to bottom, first
+     match wins, and the ORDER is the whole point:
+
+       1  no living human, or one player left  -> FINAL_RESULTS
+       2  nobody left to play this round       -> ROUND_COMPLETE
+       3  next living player is HUMAN          -> PASS_DEVICE
+       4  next living player is CPU            -> PLAYER_TURN
+
+     Rule 1 sits above rule 2 so the end-of-match check fires at TURN_RESULT
+     rather than waiting for the round to roll over. In a 1-human/3-CPU match
+     where the human is knocked out on the first turn of a round, an
+     end-of-round check would let three bots take their turns first — an
+     empty room watching itself play. That is the case this ordering exists
+     for, and it is asserted directly in ?selftest=1. */
+  nextState(ctx) {
+    if (ctx.aliveCount <= 1 || ctx.livingHumans === 0) return STATES.FINAL_RESULTS;
+    if (!ctx.nextKind) return STATES.ROUND_COMPLETE;
+    return this.needsPass(ctx.nextKind, ctx.livingHumans) ? STATES.PASS_DEVICE : STATES.PLAYER_TURN;
+  },
+
+  /* M2 CORRECTION. The plan's guard table says PASS_DEVICE whenever the next
+     living player is HUMAN, and P3 says in the same breath that "a solo game
+     never shows one". Both cannot be true: with one human and three bots the
+     table puts a PASS THE TABLET TO PLAYER 1 screen in front of the only
+     person in the room, once per round, forever.
+
+     The screen exists for one job — the tablet changing hands — so the test
+     is whether it can. It cannot while only one human is still alive, and
+     that covers the solo case at match start AND the case where a 2-human
+     match loses one of them halfway through and the survivor should just
+     keep playing. */
+  needsPass(nextKind, livingHumans) {
+    return nextKind === 'human' && livingHumans > 1;
+  },
+
+  /* ROUND_COMPLETE. ROUND_MAX is a safety net; with hearts scaling down at 3
+     and 4 players a match should end long before it, and the match then
+     resolves on points. */
+  afterRound(round) {
+    return round >= CONFIG.ROUND_MAX ? STATES.FINAL_RESULTS : STATES.ROUND_INTRO;
+  },
+
+  /* ROUND_INTRO branches on the SAME human/CPU test as nextState, because
+     round rollover bypasses the pass-device guard entirely. Without it a
+     2-human match opens each new round with the wrong person holding the
+     tablet. */
+  afterIntro(firstKind, livingHumans) {
+    return this.needsPass(firstKind, livingHumans) ? STATES.PASS_DEVICE : STATES.PLAYER_TURN;
+  },
+};
+
+/* The health model, as predicates. Same discipline as `turnRules`: the game
+   calls these, and ?selftest=1 asserts these. A parallel copy that only the
+   harness runs is worse than no test at all. */
+const playerRules = {
+  heartsFor(playerCount) { return CONFIG.HEARTS[playerCount] || 3; },
+
+  /* At most ONE heart per character per turn. Struck by the projectile AND
+     toppled off the castle in the same turn is one heart, not two — the plan
+     is explicit that they do not stack. */
+  heartsLostThisTurn(wasHit, fell) { return (wasHit || fell) ? 1 : 0; },
+
+  /* Did the character fall? `dropPx` is how far it ended up BELOW where it
+     was standing when the turn began; footX0/footX1 are its own castle's
+     footprint. See CONFIG.FALL_DY for why the reference is the standing
+     height and not the platform top. */
+  fell(dropPx, x, footX0, footX1) {
+    if (dropPx > CONFIG.FALL_DY) return true;
+    return x < footX0 - CONFIG.FALL_SLICE_PAD || x > footX1 + CONFIG.FALL_SLICE_PAD;
+  },
+
+  /* Culled past the world bounds entirely is elimination regardless of how
+     many hearts are left. There is nothing to stand back up. */
+  cullIsElimination() { return true; },
 };
 
 /* ========================================================== render =======
@@ -1216,15 +2380,60 @@ const render = {
   shakeMag: 0, shakeUntil: 0,
   hintAlpha: 0,
 
+  /* The DEFAULT half of the plan's `reduceMotion`, landing here rather than at
+     M3 because it is an OS signal and needs no UI: screen shake is a real
+     vestibular trigger and honouring the media query costs nothing. M3 adds
+     the persisted parent override on top of this.
+
+     It disables SHAKE ONLY (and, at M4, confetti). Trajectory dots, block
+     motion and the elimination wobble all carry game information and stay —
+     the plan is explicit about that. Read once; the query is stable enough
+     that re-reading per frame would be pure overhead. */
+  reduceMotion: (() => {
+    try { return !!(window.matchMedia &&
+                    window.matchMedia('(prefers-reduced-motion: reduce)').matches); }
+    catch (e) { return false; }
+  })(),
+
+  /* Fixed pool. `render` never allocates per frame, and an elimination can
+     fire at most once per player per match. */
+  puffs: [
+    { on: false, x: 0, y: 0, t0: 0, color: '#fff', charId: 'nim', facing: 1 },
+    { on: false, x: 0, y: 0, t0: 0, color: '#fff', charId: 'nim', facing: 1 },
+    { on: false, x: 0, y: 0, t0: 0, color: '#fff', charId: 'nim', facing: 1 },
+    { on: false, x: 0, y: 0, t0: 0, color: '#fff', charId: 'nim', facing: 1 },
+  ],
+
   invalidate() { this.skyGrad = null; },
-  shake(mag) { this.shakeMag = Math.max(this.shakeMag, mag); this.shakeUntil = performance.now() + 220; },
+  shake(mag) {
+    if (this.reduceMotion) return;
+    this.shakeMag = Math.max(this.shakeMag, mag);
+    this.shakeUntil = performance.now() + 220;
+  },
+
+  /* "Eliminated characters leave with a puff and a wobble, never an injury
+     animation." The BODY is already gone by the time this is called — `turns`
+     removes it so the settle predicate and the turn guards never see a corpse
+     — so the wobble is drawn from the recorded silhouette, not simulated. That
+     keeps the exit purely cosmetic and unable to affect the match. */
+  puff(x, y, color, chRec) {
+    let slot = null;
+    for (const q of this.puffs) { if (!q.on) { slot = q; break; } }
+    if (!slot) slot = this.puffs[0];
+    slot.on = true; slot.x = x; slot.y = y; slot.color = color;
+    slot.charId = (chRec && chRec.characterId) || 'nim';
+    slot.facing = (chRec && chRec.facing) || 1;
+    slot.t0 = performance.now();
+  },
+  clearPuffs() { for (const q of this.puffs) q.on = false; },
 
   frame(nowMs) {
     const ctx = view.ctx;
     const W = view.canvas.width, H = view.canvas.height;
 
+    // Letterbox bars first, in device pixels, covering the whole backing store.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = CONFIG.COLOR.sky0 === null ? '#1a2555' : '#1a2555';
+    ctx.fillStyle = CONFIG.COLOR.letterbox;
     ctx.fillRect(0, 0, W, H);
 
     ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
@@ -1248,12 +2457,22 @@ const render = {
     this.drawSky(ctx);
     this.drawGround(ctx);
     for (let i = 0; i < physics.blocks.length; i++) this.drawBlock(ctx, physics.blocks[i]);
-    for (let i = 0; i < physics.characters.length; i++) this.drawCharacter(ctx, physics.characters[i]);
+    for (let i = 0; i < physics.characters.length; i++) {
+      const rec = physics.characters[i];
+      if (rec.eliminated) continue;
+      this.drawCharacter(ctx, rec);
+      this.drawHearts(ctx, rec);
+    }
     const activeCh = turns.activeChar();
-    if (activeCh && state.curState === STATES.PLAYER_TURN) this.drawSling(ctx, activeCh);
+    if (activeCh && !activeCh.eliminated && state.curState === STATES.PLAYER_TURN) {
+      this.drawSling(ctx, activeCh);
+      this.drawTurnMarker(ctx, activeCh, nowMs);
+    }
     if (aim.active && aim.arcN > 0) { this.drawBand(ctx); this.drawArc(ctx); }
     if (physics.projectile) this.drawProjectile(ctx, physics.projectile);
+    this.drawPuffs(ctx, nowMs);
     this.drawHint(ctx, nowMs);
+    this.drawBanner(ctx);
 
     ctx.restore();
   },
@@ -1268,17 +2487,29 @@ const render = {
     ctx.fillRect(0, 0, CONFIG.WORLD_W, CONFIG.WORLD_H);
   },
 
+  /* Base ground first, then the stepped platforms on top of it, so the
+     platform outlines sit over the ground rather than under it. */
   drawGround(ctx) {
     for (let i = 0; i < physics.ground.length; i++) {
       const g = physics.ground[i].plan;
-      ctx.fillStyle = CONFIG.COLOR.dirt;
-      ctx.fillRect(g.x, g.y, g.w, g.h);
-      ctx.fillStyle = CONFIG.COLOR.grass;
-      ctx.fillRect(g.x, g.y, g.w, 10);
-      ctx.strokeStyle = CONFIG.COLOR.ink;
-      ctx.lineWidth = 4;
-      ctx.strokeRect(g.x - 2, g.y, g.w + 4, g.h);
+      if (g.platform) continue;
+      this.drawSlab(ctx, g, 4);
     }
+    for (let i = 0; i < physics.ground.length; i++) {
+      const g = physics.ground[i].plan;
+      if (!g.platform) continue;
+      this.drawSlab(ctx, g, 4);
+    }
+  },
+
+  drawSlab(ctx, g, lw) {
+    ctx.fillStyle = CONFIG.COLOR.dirt;
+    ctx.fillRect(g.x, g.y, g.w, g.h);
+    ctx.fillStyle = CONFIG.COLOR.grass;
+    ctx.fillRect(g.x, g.y, g.w, 10);
+    ctx.strokeStyle = CONFIG.COLOR.ink;
+    ctx.lineWidth = lw;
+    ctx.strokeRect(g.x - 2, g.y, g.w + 4, g.h);
   },
 
   drawBlock(ctx, rec) {
@@ -1292,6 +2523,15 @@ const render = {
     ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.22)';
     roundRect(ctx, -w / 2 + 4, -h / 2 + 4, w - 8, h / 3, 4); ctx.fill();
+    /* A stone block that has taken one of its two hits shows a crack, so
+       "it did not break" reads as progress rather than as nothing happening. */
+    if (rec.hp < rec.maxHp) {
+      ctx.strokeStyle = 'rgba(42,26,10,0.55)'; ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + 6, -h / 2 + 7);
+      ctx.lineTo(-4, -2); ctx.lineTo(5, 4); ctx.lineTo(w / 2 - 6, h / 2 - 8);
+      ctx.stroke();
+    }
     ctx.fillStyle = CONFIG.COLOR.ink;
     ctx.font = '24px "Lilita One", sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -1301,16 +2541,30 @@ const render = {
     ctx.restore();
   },
 
-  /* The "kid" silhouette. Facing is a RENDER concern only — the gesture is
-     already symmetric, so nothing about aiming is mirrored. */
+  /* TWO silhouettes, not four: a "kid" and a visibly different "robot", so a
+     non-reader can tell a human slot from a CPU slot at a glance. They are
+     tinted by the slot colour and have NO mechanical differences. Four
+     distinct shapes was four times the art for zero gameplay difference; the
+     human/robot distinction is the only one that carries information.
+
+     Facing is a RENDER concern only — the gesture is already symmetric, so
+     nothing about aiming is mirrored. */
   drawCharacter(ctx, rec) {
     const b = rec.body;
-    const w = CONFIG.CHARACTER.w, h = CONFIG.CHARACTER.h;
-    const col = CONFIG.COLOR.players[rec.castleId % 4];
+    const col = CONFIG.COLOR.players[rec.castleId % CONFIG.COLOR.players.length];
     ctx.save();
     ctx.translate(b.position.x, b.position.y);
     ctx.rotate(b.angle);
     ctx.scale(rec.facing, 1);
+    this.drawSilhouette(ctx, rec.characterId, col);
+    ctx.restore();
+  },
+
+  /* Drawn at the origin, in whatever transform the caller has set up. Factored
+     out so the live character and the elimination wobble are the SAME art —
+     an eliminated player must not leave as a different-looking creature. */
+  drawSilhouette(ctx, characterId, col) {
+    const w = CONFIG.CHARACTER.w, h = CONFIG.CHARACTER.h;
 
     // Raised arm FIRST so it sits behind the head — drawn after, its outline
     // cut a line straight across the face.
@@ -1321,19 +2575,149 @@ const render = {
     ctx.beginPath(); ctx.moveTo(6, -h / 2 + 20); ctx.lineTo(17, -h / 2 - 2); ctx.stroke();
 
     // body
-    roundRect(ctx, -w / 2, -h / 2 + 12, w, h - 12, 9);
+    roundRect(ctx, -w / 2, -h / 2 + 12, w, h - 12, characterId === 'bolt' ? 4 : 9);
     ctx.fillStyle = col; ctx.fill();
     ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 3; ctx.stroke();
-    // head
+
+    if (characterId === 'bolt') this.drawRobotHead(ctx, h);
+    else this.drawKidHead(ctx, h);
+  },
+
+  drawKidHead(ctx, h) {
     ctx.beginPath(); ctx.arc(0, -h / 2 + 8, 13, 0, Math.PI * 2);
     ctx.fillStyle = CONFIG.COLOR.cream; ctx.fill(); ctx.stroke();
-    // eyes
     ctx.fillStyle = CONFIG.COLOR.ink;
     ctx.beginPath(); ctx.arc(4, -h / 2 + 6, 2.4, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(-3, -h / 2 + 6, 2.4, 0, Math.PI * 2); ctx.fill();
-    // smile
     ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(0.5, -h / 2 + 10, 4.5, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+  },
+
+  /* Square head, antenna, visor bar. Reads as "not a person" from across a
+     room, which is the entire job. */
+  drawRobotHead(ctx, h) {
+    const cy = -h / 2 + 8;
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(0, cy - 12); ctx.lineTo(0, cy - 19); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, cy - 21, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = CONFIG.COLOR.gold; ctx.fill(); ctx.stroke();
+
+    roundRect(ctx, -12, cy - 12, 24, 23, 5);
+    ctx.fillStyle = CONFIG.COLOR.cream; ctx.fill(); ctx.stroke();
+    roundRect(ctx, -8.5, cy - 7, 17, 8, 3);
+    ctx.fillStyle = CONFIG.COLOR.ink; ctx.fill();
+    ctx.fillStyle = CONFIG.COLOR.gold;
+    ctx.beginPath(); ctx.arc(-4, cy - 3, 1.9, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(4, cy - 3, 1.9, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-5, cy + 6); ctx.lineTo(5, cy + 6); ctx.stroke();
+  },
+
+  /* Heart pips, in world space above the character. COUNTABLE, never a bar.
+     This is not the DOM HUD — that is M3, and it shows only the ACTIVE
+     player's hearts. Every character wearing its own hearts is what makes a
+     3- or 4-player board readable without one. */
+  drawHearts(ctx, rec) {
+    const p = players.byId(rec.playerId);
+    if (!p || !p.alive) return;
+    const b = rec.body;
+    const n = p.hearts;
+    if (n <= 0) return;
+    const gap = 17;
+    const y = b.bounds.min.y - 16;
+    const x0 = b.position.x - ((n - 1) * gap) / 2;
+    for (let i = 0; i < n; i++) this.drawHeart(ctx, x0 + i * gap, y, 7, p.color);
+  },
+
+  drawHeart(ctx, x, y, r, col) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.moveTo(0, r * 0.9);
+    ctx.bezierCurveTo(-r * 1.6, -r * 0.35, -r * 0.6, -r * 1.35, 0, -r * 0.45);
+    ctx.bezierCurveTo(r * 0.6, -r * 1.35, r * 1.6, -r * 0.35, 0, r * 0.9);
+    ctx.closePath();
+    ctx.fillStyle = col; ctx.fill();
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 2; ctx.stroke();
+    ctx.restore();
+  },
+
+  /* Whose turn it is, without a HUD: a bobbing chevron in the active
+     player's colour. The DOM current-player pill lands at M3. */
+  drawTurnMarker(ctx, rec, nowMs) {
+    const p = players.byId(rec.playerId);
+    if (!p) return;
+    /* Clear ABOVE the slingshot. The sling is drawn from the launch point
+       (bounds.min.y - SPAWN_OFFSET_Y) with prongs another 15 px up, and the
+       heart pips sit just over the head — a marker at 34 landed inside the
+       sling's fork and read as part of the slingshot rather than as "you". */
+    const bob = Math.sin(nowMs / 320) * 4;
+    const x = rec.body.position.x;
+    const y = rec.body.bounds.min.y - CONFIG.SPAWN_OFFSET_Y - 38 + bob;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, y + 13); ctx.lineTo(x - 11, y - 3); ctx.lineTo(x + 11, y - 3);
+    ctx.closePath();
+    ctx.fillStyle = p.color; ctx.fill();
+    ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.restore();
+  },
+
+  drawPuffs(ctx, nowMs) {
+    for (const q of this.puffs) {
+      if (!q.on) continue;
+      const ms = nowMs - q.t0;
+      const t = ms / CONFIG.ELIM_PUFF_MS;
+      if (t >= 1) { q.on = false; continue; }
+
+      /* Smoke FIRST, so it billows out from BEHIND the character. Drawn over
+         the top it just erases them, and the wobble the plan asks for is
+         invisible under a 5-circle cloud. */
+      ctx.save();
+      ctx.globalAlpha = 1 - t;
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 + t * 1.4;
+        const d = 8 + t * 46;
+        ctx.beginPath();
+        ctx.arc(q.x + Math.cos(a) * d, q.y + Math.sin(a) * d * 0.75, 13 * (1 - t * 0.55), 0, Math.PI * 2);
+        ctx.fillStyle = q.color; ctx.fill();
+        ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineWidth = 2.5; ctx.stroke();
+      }
+      ctx.restore();
+
+      /* Then the wobble on top: the character rocks, shrinks and fades out
+         through the smoke. Never an injury animation — the same cheerful
+         silhouette, just leaving. Runs shorter than the puff, so the smoke
+         outlives the kid rather than the other way round. */
+      if (ms < CONFIG.ELIM_WOBBLE_MS) {
+        const w = ms / CONFIG.ELIM_WOBBLE_MS;
+        ctx.save();
+        ctx.globalAlpha = 1 - w * w;
+        ctx.translate(q.x, q.y + w * 10);
+        ctx.rotate(Math.sin(w * Math.PI * 5) * 0.45 * (1 - w));
+        ctx.scale((1 - w * 0.35) * q.facing, 1 - w * 0.35);
+        this.drawSilhouette(ctx, q.charId, q.color);
+        ctx.restore();
+      }
+    }
+  },
+
+  /* ROUND N, for the 0.6 s ROUND_INTRO beat. Canvas, not DOM: the round pill
+     that lives permanently in the HUD is M3. */
+  drawBanner(ctx) {
+    if (state.curState !== STATES.ROUND_INTRO) return;
+    const t = clamp(turns.introSteps / CONFIG.ROUND_INTRO_STEPS, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = t < 0.8 ? 1 : (1 - (t - 0.8) / 0.2);
+    ctx.fillStyle = 'rgba(26,37,85,0.72)';
+    ctx.fillRect(0, CONFIG.WORLD_H / 2 - 62, CONFIG.WORLD_W, 124);
+    ctx.font = '72px "Lilita One", sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 8; ctx.strokeStyle = CONFIG.COLOR.ink; ctx.lineJoin = 'round';
+    ctx.strokeText('ROUND ' + turns.round, CONFIG.WORLD_W / 2, CONFIG.WORLD_H / 2);
+    ctx.fillStyle = CONFIG.COLOR.gold;
+    ctx.fillText('ROUND ' + turns.round, CONFIG.WORLD_W / 2, CONFIG.WORLD_H / 2);
     ctx.restore();
   },
 
@@ -1459,6 +2843,17 @@ function roundRect(c, x, y, w, h, r) {
    Emits actions downward into `turns`. Never mutates game state directly.
    ======================================================================== */
 const ui = {
+  /* What the DOM currently reflects. Three fields rather than the state
+     alone: turns.ready() can re-enter PASS_DEVICE with a DIFFERENT pending
+     player (the one it was waiting on was culled off the world while the
+     tablet was being handed over), and comparing only curState would skip
+     the re-sync — leaving the old player on the badge and I'M READY disabled
+     from the tap that got us here, with no way out. */
+  lastState: null,
+  lastPending: -1,
+  lastWinner: -1,
+  btnArmedAt: 0,
+
   attach() {
     const c = view.canvas;
     c.addEventListener('pointerdown', this.onDown, { passive: false });
@@ -1468,12 +2863,77 @@ const ui = {
     window.addEventListener('resize', () => view.resize());
     window.addEventListener('orientationchange', () => setTimeout(() => view.resize(), 60));
 
+    /* Overlay buttons get a BUTTON_DEBOUNCE_MS window plus immediate
+       self-disable on first activation, because a 4-year-old double-taps
+       everything and the second tap must not reach the next screen. */
+    this.bind('pass-btn', () => turns.ready());
+    this.bind('resume-btn', () => turns.resume());
+    this.bind('again-btn', () => turns.playAgain());
+    this.bind('pause-btn', () => turns.pause(), true);
+
     // Audio unlock — WebAudio is silent on iOS until resumed inside a gesture.
     ['pointerdown', 'touchstart', 'keydown'].forEach(ev =>
       document.addEventListener(ev, () => audio.ensure(), { once: true, passive: true }));
 
     // Never let a tab stall dump a huge backlog into the accumulator.
     document.addEventListener('visibilitychange', () => { loopState.lastT = 0; });
+  },
+
+  /* One handler shape for every overlay button. `instant` skips the arming
+     window for the pause button, which is not an overlay button and is not
+     the thing a double-tap can skip past. */
+  bind(id, action, instant) {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      if (el.disabled) return;
+      if (!instant && performance.now() - ui.btnArmedAt < CONFIG.BUTTON_DEBOUNCE_MS) return;
+      el.disabled = true;                       // self-disable on first activation
+      audio.ensure();                           // the gesture that unlocks iOS audio
+      action();
+    });
+  },
+
+  /* `ui` reads state and shows the matching overlay. It never mutates game
+     state: every button above emits an intent into `turns`, which owns the
+     transition. Runs once per frame but only touches the DOM when the state
+     actually changed — otherwise this is a per-frame layout thrash. */
+  syncOverlays() {
+    const st = state.curState;
+    if (st === this.lastState && turns.pendingIdx === this.lastPending &&
+        turns.winnerId === this.lastWinner) return;
+    this.lastState = st;
+    this.lastPending = turns.pendingIdx;
+    this.lastWinner = turns.winnerId;
+    this.btnArmedAt = performance.now();
+
+    $('pass').hidden   = st !== STATES.PASS_DEVICE;
+    $('paused').hidden = st !== STATES.PAUSED;
+    $('final').hidden  = st !== STATES.FINAL_RESULTS;
+    $('pause-btn').hidden = st !== STATES.PLAYER_TURN;
+
+    const passBtn = $('pass-btn'), resumeBtn = $('resume-btn'), againBtn = $('again-btn');
+    if (passBtn) passBtn.disabled = false;
+    if (resumeBtn) resumeBtn.disabled = false;
+    if (againBtn) againBtn.disabled = false;
+
+    if (st === STATES.PASS_DEVICE) {
+      const p = players.list[turns.pendingIdx];
+      if (p) {
+        $('pass-num').textContent = String(p.id);
+        $('pass-badge').style.background = p.color;
+        $('pass-name').textContent = p.name;
+      }
+    } else if (st === STATES.FINAL_RESULTS) {
+      const w = players.byId(turns.winnerId);
+      if (w) {
+        $('final-num').textContent = String(w.id);
+        $('final-badge').style.background = w.color;
+        $('final-name').textContent = w.name;
+        $('final-title').textContent = w.kind === 'cpu' ? 'THE ROBOT WINS' : 'WINNER';
+      }
+    }
   },
 
   inActiveSlice(wx, wy) {
@@ -1604,7 +3064,14 @@ function loop(now) {
   let frameMs = now - loopState.lastT;
   loopState.lastT = now;
   if (frameMs > 250) frameMs = 250;         // tab stall clamp
-  loopState.acc += frameMs;
+
+  /* PAUSED advances NOTHING. Not the accumulator, not a step, not the CPU's
+     think timer, not TURN_MAX_STEPS. That is why every deadline in this file
+     is counted in simulated steps rather than wall clock: a performance.now()
+     deadline would expire behind the pause overlay, and the state table has
+     no PAUSED -> TURN_RESULT edge for it to fire into. */
+  const frozen = state.curState === STATES.PAUSED;
+  if (frozen) loopState.acc = 0; else loopState.acc += frameMs;
 
   const tWork = PERF ? performance.now() : 0;
 
@@ -1626,7 +3093,8 @@ function loop(now) {
     aim.dirty = false;
   }
 
-  turns.frame(steps);
+  if (!frozen) turns.frame(steps);
+  ui.syncOverlays();
   const tTurns = PERF ? performance.now() : 0;
   render.frame(now);
 
@@ -1719,12 +3187,19 @@ async function boot() {
   view.init();
   physics.create();
 
-  const stress = PERF;
-  players.reset(1);
-  // M1: ONE castle. 3 columns x 4 rows = 12 blocks (the plan's 2-player
-  // castle, which is the generous one). ?perf=1 builds 40 blocks instead,
-  // which is the body count the performance budget is written against.
-  physics.build(1, stress ? { cols: 4, rows: 10 } : { cols: 3, rows: 4 });
+  /* ?perf=1 alone is M1's single-slot stress rig: 40 blocks, which is the body
+     count the performance budget is written against, cycling forever with no
+     hearts and no elimination.
+
+     ?perf=1&slots=hccc runs a REAL 4-player match with the same overlay, which
+     is what the M2 budget needs measuring against — 36 blocks plus 4
+     characters is a different body mix from one 40-block tower. */
+  const stress = PERF && !QS.get('slots');
+  const kinds = stress ? ['human'] : (parseSlots(QS.get('slots')) || parseSlots('hc'));
+  players.reset(kinds);
+  physics.build(kinds.length, stress
+    ? { cols: 4, rows: 10, characterIds: ['nim'] }
+    : { characterIds: players.list.map(p => p.characterId) });
 
   ui.attach();
 
@@ -1733,10 +3208,17 @@ async function boot() {
   $('splash').hidden = true;
   if (PERF) { perf.init(); perf.el.hidden = false; }
 
-  turns.beginTurn(0);
-  requestAnimationFrame(loop);
+  /* ?selftest=1 does NOT start the match or the rAF loop. The cpu, world and
+     players groups need to build worlds of their own (4 players, a flattened
+     castle, an unreachable target), and a live loop mutating the same
+     singletons underneath them makes the harness a coin flip. Reload without
+     the flag to play. */
+  if (SELFTEST) { runSelftest(); return; }
 
-  if (SELFTEST) runSelftest();
+  turns.stressLoop = stress;
+  if (stress) turns.beginTurn(0);
+  else turns.startMatch();
+  requestAnimationFrame(loop);
 }
 
 /* ======================================================== selftest =======
@@ -1772,6 +3254,15 @@ function runSelftest() {
   const near = (a, b, eps, msg) => {
     if (!(Math.abs(a - b) <= eps)) throw new Error((msg || 'not near') + ': ' + a + ' vs ' + b + ' (eps ' + eps + ')');
     return a.toFixed(4) + ' ~= ' + b.toFixed(4);
+  };
+
+  /* Build a real world to assert against, and hand back the opponent list in
+     the shape `cpu` takes. ?selftest=1 does not start the match loop (see
+     boot), so these worlds are the harness's alone and nothing is racing it. */
+  const stWorld = (kinds) => {
+    players.reset(kinds);
+    physics.build(kinds.length, { characterIds: players.list.map(p => p.characterId) });
+    return players.list.map(p => ({ id: p.id, castleId: p.castleId, alive: p.alive }));
   };
 
   /* ---- aim: power curve ---- */
@@ -2143,6 +3634,683 @@ function runSelftest() {
            Math.abs(naive.y - p.y).toFixed(0) + ' px';
   });
 
+  /* ---- world: the M2 platform choice, re-derived not asserted by hand ---- */
+  T('world', 'platform heights stay inside the bound MAX_SPEED was derived under', () => {
+    ok(CONFIG.PLATFORM_DY <= CONFIG.PLATFORM_DY_MAX,
+       'PLATFORM_DY (' + CONFIG.PLATFORM_DY + ') exceeds PLATFORM_DY_MAX (' +
+       CONFIG.PLATFORM_DY_MAX + ') — MAX_SPEED must be re-derived');
+    for (const n of [2, 3, 4]) {
+      ok(world.maxPlatformDelta(n) <= CONFIG.PLATFORM_DY_MAX,
+         'n=' + n + ' delta ' + world.maxPlatformDelta(n) + ' exceeds the bound');
+    }
+    ok(world.maxPlatformDelta(2) === CONFIG.PLATFORM_DY, 'alternating heights should differ by exactly PLATFORM_DY');
+    return 'PLATFORM_DY ' + CONFIG.PLATFORM_DY + ' <= bound ' + CONFIG.PLATFORM_DY_MAX;
+  });
+
+  T('world', 'minSpeedFor reduces to the flat-ground range formula at h = 0', () => {
+    const g = world.gravityPerTick();
+    near(g, 0.2778, 0.0005, 'gravity per BASE_DELTA^2');
+    for (const R of [90, 512, 768, 1166]) {
+      const v = world.minSpeedFor(R, 0);
+      near(v * v / g, R, 1e-6, 'R = v^2/g at ' + R);
+    }
+    // The plan's own worked example, at the bounding height.
+    near(world.minSpeedFor(768, 80), 15.4, 0.05, "the plan's 80 px / 768 px figure");
+    return 'flat R = v^2/g exactly; plan case 768@80 -> ' + world.minSpeedFor(768, 80).toFixed(2);
+  });
+
+  T('world', 'MAX_SPEED covers the longest uphill shot at the CHOSEN heights', () => {
+    /* This is the Open Question 1 re-verification, computed from CONFIG so
+       raising PLATFORM_DY or adding a fifth slot re-fails it instead of
+       silently invalidating MAX_SPEED. */
+    let worst = 0, worstAt = '';
+    for (const n of [2, 3, 4]) {
+      const R = world.maxSpan(n);
+      const h = world.maxPlatformDelta(n);
+      const v = world.minSpeedFor(R, h);
+      ok(v <= CONFIG.MAX_SPEED,
+         'n=' + n + ' needs v=' + v.toFixed(2) + ' > MAX_SPEED ' + CONFIG.MAX_SPEED);
+      if (v > worst) { worst = v; worstAt = 'n=' + n + ' R=' + R.toFixed(0) + ' h=' + h; }
+    }
+    const headroom = (CONFIG.MAX_SPEED / worst - 1) * 100;
+    ok(headroom >= 10, 'only ' + headroom.toFixed(0) + '% headroom over the worst required shot');
+    near(world.maxSpan(4), 768, 1e-9, 'the 4-player span');
+    return 'worst required v=' + worst.toFixed(2) + ' (' + worstAt + ') vs MAX_SPEED ' +
+           CONFIG.MAX_SPEED + ' = ' + headroom.toFixed(1) + '% headroom';
+  });
+
+  T('world', 'the ground plan is base-first, then alternating platforms', () => {
+    for (const n of [2, 3, 4]) {
+      const plan = world.buildGroundPlan(n, 3);
+      ok(plan[0].x === 0 && plan[0].w === CONFIG.WORLD_W && !plan[0].platform,
+         'index 0 must be the base ground spanning the world');
+      near(plan[0].y, world.GROUND_TOP, 1e-9, 'base ground top');
+      const raised = plan.slice(1);
+      const expected = Math.floor(n / 2);
+      ok(raised.length === expected,
+         'n=' + n + ' expected ' + expected + ' platforms, got ' + raised.length);
+      for (const g of raised) {
+        ok(g.platform === true, 'a non-base slab must be flagged as a platform');
+        near(g.y, world.GROUND_TOP - CONFIG.PLATFORM_DY, 1e-9, 'platform top');
+        ok(g.h > CONFIG.PLATFORM_DY, 'a platform must sink into the base ground, or it seams');
+      }
+      const centres = world.castleCentres(n);
+      for (let i = 0; i < n; i++) {
+        near(world.platformTopY(i), world.GROUND_TOP - (i % 2) * CONFIG.PLATFORM_DY, 1e-9,
+             'castle ' + i + ' platform top');
+      }
+      // Platforms must not overlap each other.
+      for (let a = 0; a < raised.length; a++) {
+        for (let b2 = a + 1; b2 < raised.length; b2++) {
+          ok(raised[a].x + raised[a].w <= raised[b2].x || raised[b2].x + raised[b2].w <= raised[a].x,
+             'platforms overlap at n=' + n);
+        }
+      }
+      ok(centres.length === n, 'centre count');
+    }
+    return 'n=2 ->1 platform, n=3 ->1, n=4 ->2, all at y=' +
+           (world.GROUND_TOP - CONFIG.PLATFORM_DY) + ', none overlapping';
+  });
+
+  T('world', 'stone is the bottom row and nothing else', () => {
+    ok(world.matFor(0) === 'stone', 'the bottom row must be stone');
+    ok(world.matFor(1) === 'wood', 'row 1 must be wood');
+    ok(world.matFor(3) === 'wood', 'row 3 must be wood');
+    for (const [cols, rows] of [[3, 3], [3, 4]]) {
+      const plan = world.makeCastlePlan(cols, rows);
+      const stone = plan.filter(d => d.mat === 'stone');
+      ok(stone.length === cols, 'expected ' + cols + ' stone blocks, got ' + stone.length);
+      ok(stone.every(d => d.gy === 0), 'stone appeared above the bottom row');
+      ok(plan.length === cols * rows, 'block count');
+    }
+    // Materials differ in hit points ONLY. Ice was cut for having a physics
+    // property; stone must not quietly acquire one.
+    ok(CONFIG.MAT_HITS.stone === 2 && CONFIG.MAT_HITS.wood === 1, 'hit points');
+    ok(!CONFIG.BLOCK.stone && !CONFIG.BLOCK.wood,
+       'a per-material physics override has appeared in CONFIG.BLOCK');
+    return 'bottom row stone (2 hits), all else wood (1 hit), identical physics';
+  });
+
+  T('world', 'the block budget matches the plan: 12 in 4 rows at 2, 9 in 3 at 3-4', () => {
+    ok(physics.rowsFor(2) === 4, '2 players get the generous 4-row castle');
+    ok(physics.rowsFor(3) === 3, '3 players get 3 rows');
+    ok(physics.rowsFor(4) === 3, '4 players get 3 rows');
+    ok(3 * physics.rowsFor(2) === 12 && 3 * physics.rowsFor(4) === 9, 'block counts');
+    ok(CONFIG.LABEL_MIX[9] && CONFIG.LABEL_MIX[12], 'both budgets need a label mix');
+    return '2p: 3x4 = 12 blocks   3p/4p: 3x3 = 9 blocks';
+  });
+
+  /* ---- slots (the rule the M3 setup screen will enforce) ---- */
+  T('world', 'slot config takes 2-4 slots and never zero humans', () => {
+    ok(parseSlots('hc') !== null && parseSlots('hc').join() === 'human,cpu', 'hc');
+    ok(parseSlots('hh').join() === 'human,human', 'hh');
+    ok(parseSlots('hccc').length === 4, 'hccc');
+    ok(parseSlots('HCCC').length === 4, 'case-insensitive');
+    ok(parseSlots('cc') === null, 'zero humans must be refused');
+    ok(parseSlots('cccc') === null, 'zero humans must be refused at 4');
+    ok(parseSlots('h') === null, 'one slot is not a match');
+    ok(parseSlots('hhhhh') === null, '5 players is not v1 — teams are the path');
+    ok(parseSlots('') === null && parseSlots(null) === null && parseSlots('xyz') === null,
+       'junk must not produce a match');
+    return '2-4 slots, >=1 human; "cc", "h", "hhhhh" and junk all refused';
+  });
+
+  /* ---- turns: the guard ORDER out of TURN_RESULT ---- */
+  T('turns', 'guard order puts no-humans-alive AHEAD of round rollover', () => {
+    /* The case this ordering exists for: the only human is knocked out on the
+       first turn of a round in a 1-human/3-CPU match. An end-of-round check
+       would let three bots take their turns first — an empty room watching
+       itself play. */
+    ok(turnRules.nextState({ aliveCount: 3, livingHumans: 0, nextKind: 'cpu' }) === STATES.FINAL_RESULTS,
+       'bots still queued, no human alive: must end the match');
+    ok(turnRules.nextState({ aliveCount: 3, livingHumans: 0, nextKind: null }) === STATES.FINAL_RESULTS,
+       'and it must beat ROUND_COMPLETE too');
+    ok(turnRules.nextState({ aliveCount: 1, livingHumans: 1, nextKind: 'cpu' }) === STATES.FINAL_RESULTS,
+       'last player standing must end the match before anyone else moves');
+    // ...and with humans alive and players left, rule 1 must NOT fire.
+    ok(turnRules.nextState({ aliveCount: 2, livingHumans: 1, nextKind: 'cpu' }) === STATES.PLAYER_TURN,
+       'rule 1 fired when it should not have');
+    return 'rule 1 (FINAL_RESULTS) outranks rules 2-4, in every combination';
+  });
+
+  T('turns', 'no player left this round rolls the round over', () => {
+    ok(turnRules.nextState({ aliveCount: 3, livingHumans: 2, nextKind: null }) === STATES.ROUND_COMPLETE,
+       'nobody left to play must be ROUND_COMPLETE');
+    ok(turnRules.afterRound(CONFIG.ROUND_MAX - 1) === STATES.ROUND_INTRO, 'should start another round');
+    ok(turnRules.afterRound(CONFIG.ROUND_MAX) === STATES.FINAL_RESULTS, 'ROUND_MAX must end the match');
+    ok(turnRules.afterRound(CONFIG.ROUND_MAX + 3) === STATES.FINAL_RESULTS, 'and stay ended');
+    return 'rolls to ROUND_INTRO below ' + CONFIG.ROUND_MAX + ', FINAL_RESULTS at it';
+  });
+
+  T('turns', 'next-player branches human vs CPU, and skips the pass screen solo', () => {
+    ok(turnRules.nextState({ aliveCount: 3, livingHumans: 2, nextKind: 'human' }) === STATES.PASS_DEVICE,
+       'two humans: the tablet has to change hands');
+    ok(turnRules.nextState({ aliveCount: 3, livingHumans: 2, nextKind: 'cpu' }) === STATES.PLAYER_TURN,
+       'a CPU turn must never show the pass screen');
+    ok(turnRules.nextState({ aliveCount: 4, livingHumans: 1, nextKind: 'human' }) === STATES.PLAYER_TURN,
+       'one human in the room: there is nobody to pass to');
+    // ROUND_INTRO has to make the SAME decision, or round rollover hands the
+    // tablet to the wrong person.
+    ok(turnRules.afterIntro('human', 2) === STATES.PASS_DEVICE, 'round opens on a human');
+    ok(turnRules.afterIntro('cpu', 2) === STATES.PLAYER_TURN, 'round opens on a bot');
+    ok(turnRules.afterIntro('human', 1) === STATES.PLAYER_TURN, 'solo round open');
+    for (const lh of [1, 2, 3, 4]) {
+      for (const k of ['human', 'cpu']) {
+        ok(turnRules.afterIntro(k, lh) ===
+           turnRules.nextState({ aliveCount: 4, livingHumans: lh, nextKind: k }),
+           'ROUND_INTRO and TURN_RESULT disagree at livingHumans=' + lh + ' kind=' + k);
+      }
+    }
+    return 'PASS_DEVICE only when the next player is human AND >1 human is alive; ' +
+           'ROUND_INTRO agrees with TURN_RESULT in all 8 combinations';
+  });
+
+  T('turns', 'every living player gets exactly one turn per round, in a fixed order', () => {
+    players.reset(['human', 'cpu', 'human', 'cpu']);
+    players.list[1].alive = false;                 // P2 eliminated mid-match
+    turns.order = players.list.map(p => p.id);
+    turns.orderIdx = -1;
+
+    const first = turns.firstLivingInOrder();
+    ok(first && first.player.id === 1, 'the round must open on the first LIVING player');
+    turns.orderIdx = first.orderIdx;
+    const visited = [first.player.id];
+    for (let guard = 0; guard < 20; guard++) {
+      const nxt = turns.nextLivingInOrder();
+      if (!nxt) break;
+      visited.push(nxt.player.id);
+      turns.orderIdx = nxt.orderIdx;
+    }
+    ok(visited.join(',') === '1,3,4',
+       'expected 1,3,4 (P2 eliminated), got ' + visited.join(','));
+    ok(new Set(visited).size === visited.length, 'a player took two turns in one round');
+    ok(turns.nextLivingInOrder() === null, 'the round must end after the last living player');
+
+    // Eliminating someone mid-round must not reshuffle who is still owed a turn.
+    turns.orderIdx = 0;
+    players.list[2].alive = false;                 // P3 dies during P1's turn
+    const after = turns.nextLivingInOrder();
+    ok(after && after.player.id === 4, 'a player eliminated mid-round must be skipped, not reordered');
+    return 'order [1,2,3,4] with P2 dead visits 1,3,4 exactly once; mid-round death skips cleanly';
+  });
+
+  T('turns', 'a CPU turn keeps input locked for its whole duration', () => {
+    players.reset(['cpu', 'human']);
+    turns.cur = 0;
+    physics.projectile = null;
+    turns.setState(STATES.PLAYER_TURN);
+    ok(state.inputLocked === true,
+       'a human must not be able to fire the bot\'s shot');
+    turns.cur = 1;
+    turns.setState(STATES.PLAYER_TURN);
+    ok(state.inputLocked === false, 'a human turn with an empty world must unlock');
+    // and the M1 in-flight clause still holds on top of it
+    physics.projectile = { fake: true };
+    turns.setState(STATES.PLAYER_TURN);
+    ok(state.inputLocked === true, 'the in-flight clause was lost');
+    physics.projectile = null;
+    return 'locked for CPU turns; still locked mid-flight; unlocked only for a human with nothing in the air';
+  });
+
+  T('turns', 'nothing can fire twice in one turn', () => {
+    /* The mash case, as a predicate. turns.fire() is the one place a
+       projectile is ever spawned and shotFired is what closes it; the pointer
+       path adds the inputLocked guard on top. */
+    const savedState = state.curState, savedLock = state.inputLocked;
+    const savedFired = turns.shotFired, savedProj = physics.projectile;
+    try {
+      state.curState = STATES.TURN_RESULT;
+      turns.shotFired = false;
+      ok(turns.fire(1, -1, 5) === false, 'fire() outside PLAYER_TURN must be a no-op');
+
+      state.curState = STATES.PLAYER_TURN;
+      turns.shotFired = true;
+      ok(turns.fire(1, -1, 5) === false, 'a second fire() in one turn must be a no-op');
+
+      state.inputLocked = true;
+      turns.shotFired = false;
+      ok(turns.fireShot() === false, 'the pointer path must be closed while input is locked');
+
+      state.curState = STATES.PAUSED;
+      state.inputLocked = true;
+      ok(turns.fireShot() === false, 'the pointer path must be closed while paused');
+    } finally {
+      state.curState = savedState; state.inputLocked = savedLock;
+      turns.shotFired = savedFired; physics.projectile = savedProj;
+    }
+    return 'blocked outside PLAYER_TURN, after the turn\'s shot, while locked, and while paused';
+  });
+
+  /* ---- players: hearts, elimination, scoring ---- */
+  T('players', 'hearts scale with player count', () => {
+    ok(playerRules.heartsFor(2) === 3, '2 players get 3 hearts');
+    ok(playerRules.heartsFor(3) === 2, '3 players get 2');
+    ok(playerRules.heartsFor(4) === 2, '4 players get 2');
+    for (const n of [2, 3, 4]) {
+      players.reset(new Array(n).fill('human'));
+      ok(players.list.every(p => p.hearts === playerRules.heartsFor(n)),
+         'reset did not apply the table at n=' + n);
+    }
+    return '{2:3, 3:2, 4:2} — the dial for match length, not ROUND_MAX';
+  });
+
+  T('players', 'at most one heart per turn: a hit and a fall do not stack', () => {
+    ok(playerRules.heartsLostThisTurn(true, false) === 1, 'struck by the projectile');
+    ok(playerRules.heartsLostThisTurn(false, true) === 1, 'fell');
+    ok(playerRules.heartsLostThisTurn(true, true) === 1,
+       'hit AND fell in one turn must still be one heart');
+    ok(playerRules.heartsLostThisTurn(false, false) === 0, 'untouched');
+    return 'hit=1, fall=1, both=1, neither=0';
+  });
+
+  T('players', 'the fall threshold brackets the castles the game actually builds', () => {
+    const rowPx = CONFIG.BLOCK.h;
+    const shortest = physics.rowsFor(4) * rowPx;          // 3 rows = 120 px
+    ok(playerRules.fell(shortest, 0, -60, 60) === true,
+       'a full topple off the SHORTEST castle (' + shortest + ' px) must cost a heart — ' +
+       'that is the case the rule exists for');
+    ok(playerRules.fell(rowPx, 0, -60, 60) === false,
+       'losing one row of cover (' + rowPx + ' px) must NOT cost a heart');
+    ok(CONFIG.FALL_DY > rowPx && CONFIG.FALL_DY < shortest,
+       'FALL_DY (' + CONFIG.FALL_DY + ') must sit strictly inside (' + rowPx + ', ' + shortest + ')');
+    // knocked sideways off its own castle
+    ok(playerRules.fell(0, 60 + CONFIG.FALL_SLICE_PAD + 1, -60, 60) === true, 'knocked off the right');
+    ok(playerRules.fell(0, -60 - CONFIG.FALL_SLICE_PAD - 1, -60, 60) === true, 'knocked off the left');
+    ok(playerRules.fell(0, 60 + CONFIG.FALL_SLICE_PAD - 1, -60, 60) === false,
+       'standing at the edge of its own platform is not a fall');
+    ok(playerRules.fell(-200, 0, -60, 60) === false, 'moving UP is never a fall');
+    return 'FALL_DY ' + CONFIG.FALL_DY + ' in (' + rowPx + ', ' + shortest + '); ' +
+           'sideways past footprint +/-' + CONFIG.FALL_SLICE_PAD + ' also falls';
+  });
+
+  T('players', 'resolveTurn takes exactly one heart and stands the character back up', () => {
+    stWorld(['human', 'human']);
+    turns.cur = 0;
+    turns.hitChars.length = 0;
+    const ch = physics.charOf(1);
+    const p = players.byId(2);
+    const before = p.hearts;
+    const home = ch.body.position.y;
+    ch.turnStartY = home;
+
+    Body.setPosition(ch.body, { x: ch.body.position.x, y: home + 3 * CONFIG.BLOCK.h });
+    turns.resolveTurn(true);
+    ok(p.hearts === before - 1, 'a topple must cost exactly one heart, got ' + (before - p.hearts));
+    ok(ch.body.position.y <= home + 2,
+       'the character must be stood back up, ended at y=' + ch.body.position.y.toFixed(0));
+
+    // Standing where it started costs nothing.
+    turns.resolveTurn(true);
+    ok(p.hearts === before - 1, 'a second resolve with nothing moving took another heart');
+
+    // Hit AND fell in the same turn is still one heart.
+    turns.hitChars.length = 0; turns.hitChars.push(2);
+    ch.turnStartY = ch.body.position.y;
+    Body.setPosition(ch.body, { x: ch.body.position.x, y: ch.body.position.y + 3 * CONFIG.BLOCK.h });
+    turns.resolveTurn(true);
+    ok(p.hearts === before - 2, 'hit + fall in one turn cost ' + (before - 1 - p.hearts) + ' hearts, expected 1');
+    return 'topple -> 1 heart + re-stood; idle -> 0; hit+topple -> 1';
+  });
+
+  T('players', 'hearts reaching zero eliminates, and a cull eliminates outright', () => {
+    players.reset(['human', 'cpu']);
+    const p = players.list[0];
+    p.hearts = 2;
+    ok(players.loseHeart(p) === false && p.hearts === 1 && p.alive, 'first heart');
+    ok(players.loseHeart(p) === true && p.hearts === 0 && !p.alive, 'zero hearts must eliminate');
+    ok(players.loseHeart(p) === false, 'an eliminated player cannot lose another heart');
+
+    const q = players.list[1];
+    q.hearts = 2;
+    ok(playerRules.cullIsElimination() === true, 'off the world is out, hearts or not');
+    players.eliminate(q);
+    ok(!q.alive && q.hearts === 0, 'cull must eliminate with hearts still on the clock');
+    return 'hearts 0 -> out; culled off the world -> out regardless of hearts';
+  });
+
+  T('players', 'the score table, and 0 (never negative) for your own castle', () => {
+    stWorld(['human', 'cpu']);
+    turns.cur = 0; turns.shotPoints = 0; turns.shotSelfHit = false;
+    const me = players.byId(1);
+    me.score = 0; me.stats.selfHits = 0; me.stats.bestShotDamage = 0;
+    const wood = { mat: 'wood', castleId: 1 }, stone = { mat: 'stone', castleId: 1 };
+
+    ok(turns.scoreFor({ type: 'blockHit', destroyed: false, rec: wood }) === CONFIG.SCORE.blockHit, '+10 HIT');
+    ok(turns.scoreFor({ type: 'blockHit', destroyed: true, rec: wood }) === CONFIG.SCORE.woodKill, '+25 SMASH');
+    ok(turns.scoreFor({ type: 'blockHit', destroyed: true, rec: stone }) === CONFIG.SCORE.stoneKill, '+50 STONE');
+    ok(turns.scoreFor({ type: 'charHit' }) === CONFIG.SCORE.charHit, '+100 DIRECT HIT');
+    ok(turns.scoreFor({ type: 'knockout' }) === CONFIG.SCORE.knockout, '+200 KNOCKOUT');
+
+    turns.award({ type: 'blockHit', destroyed: true, rec: wood }, false);
+    ok(me.score === 25, 'an opponent block must score');
+    turns.award({ type: 'blockHit', destroyed: true, rec: { mat: 'wood', castleId: 0 } }, true);
+    ok(me.score === 25, 'your own castle must not change the score');
+    ok(me.score >= 0, 'the score must never go negative (2.3)');
+    ok(me.stats.selfHits === 1, 'a self hit must be counted — the SILLY SHOT award reads it');
+    turns.award({ type: 'blockHit', destroyed: true, rec: { mat: 'stone', castleId: 0 } }, true);
+    ok(me.stats.selfHits === 1, 'selfHits counts SHOTS, not collisions');
+    ok(me.stats.bestShotDamage === 25, 'bestShotDamage should hold this shot\'s points');
+    return 'own castle = 0 OOPS, never negative; selfHits counted once per shot';
+  });
+
+  T('players', 'the winner is the last player standing, points only as the tiebreak', () => {
+    players.reset(['human', 'cpu']);
+    players.list[0].score = 10;   players.list[0].alive = true;
+    players.list[1].score = 9999; players.list[1].alive = false;
+    ok(players.winner().id === 1,
+       'the top scorer won while eliminated — that is the CHAMPION-vs-winner contradiction');
+    players.list[1].alive = true;
+    ok(players.winner().id === 2, 'among the living, points are the tiebreak');
+    players.list[0].score = 9999;
+    ok(players.winner().id === 1, 'ties broken by score');
+    players.list[1].score = 9999;
+    ok(players.winner().id === 1, 'an exact tie breaks to the lower player id');
+    return 'last standing first; points only among the living; ties to the lower id';
+  });
+
+  T('players', 'a mutual elimination still ends the match and still names a winner', () => {
+    /* One shot can take the last two players out together — a self-hit that
+       also topples the opponent. alive.length is then 0, not 1, and both the
+       guard and the winner lookup have to survive it: an empty `alive` list
+       must not fall through to ROUND_COMPLETE, and winner() must not return
+       null and leave FINAL_RESULTS showing a blank badge. */
+    players.reset(['human', 'cpu']);
+    players.list[0].score = 300; players.list[0].alive = false;
+    players.list[1].score = 120; players.list[1].alive = false;
+
+    ok(players.living().length === 0, 'setup: nobody left alive');
+    ok(turnRules.nextState({ aliveCount: 0, livingHumans: 0, nextKind: 'cpu' }) === STATES.FINAL_RESULTS,
+       'an empty board must end the match, not roll the round over');
+    const w = players.winner();
+    ok(w !== null, 'winner() returned null — FINAL_RESULTS would draw a blank badge');
+    ok(w.id === 1, 'with nobody standing, the highest score takes it, got player ' + w.id);
+
+    // ...and an exact tie among the dead still resolves, to the lower id.
+    players.list[1].score = 300;
+    ok(players.winner().id === 1, 'a tie among the eliminated must still resolve');
+    return 'alive=0 -> FINAL_RESULTS, winner falls back to top score, ties to lower id';
+  });
+
+  T('players', 'Play Again resets hearts, scores and stats but keeps the slots', () => {
+    players.reset(['human', 'cpu', 'cpu']);
+    players.list[0].score = 500; players.list[0].hearts = 0; players.list[0].alive = false;
+    players.list[1].stats.selfHits = 3; players.list[1].stats.bestShotDamage = 200;
+    players.resetMatch();
+    ok(players.list.length === 3, 'slots must survive');
+    ok(players.list[0].kind === 'human' && players.list[1].kind === 'cpu', 'kinds must survive');
+    ok(players.list.every(p => p.alive && p.score === 0), 'alive and scores must reset');
+    ok(players.list.every(p => p.hearts === playerRules.heartsFor(3)), 'hearts must reset to the table');
+    ok(players.list.every(p => p.stats.selfHits === 0 && p.stats.bestShotDamage === 0), 'stats must reset');
+    return 'hearts/score/alive/stats reset, kinds and count kept';
+  });
+
+  /* ---- cpu ---- */
+  T('cpu', 'targets the opponent with the FEWEST standing blocks', () => {
+    const opp = stWorld(['cpu', 'cpu', 'cpu', 'cpu']);
+    // Flatten most of castle 2 so it is clearly the weakest.
+    const doomed = physics.blocks.filter(b => b.castleId === 2).slice(0, 7);
+    for (const rec of doomed) physics.destroyBlock(rec);
+    ok(physics.countStanding(2) < physics.countStanding(1), 'setup: castle 2 must be the weakest');
+
+    const t = cpu.chooseTarget(0, opp);
+    ok(t && t.opponent.castleId === 2,
+       'expected the weakest castle (2), got ' + (t ? t.opponent.castleId : 'null') +
+       ' — targeting the healthiest is what stops matches from ending');
+    ok(t.kind === 'block', 'a castle with blocks left is a block target');
+
+    // Ties go to the nearest.
+    stWorld(['cpu', 'cpu', 'cpu', 'cpu']);
+    const opp2 = players.list.map(p => ({ id: p.id, castleId: p.castleId, alive: p.alive }));
+    const t2 = cpu.chooseTarget(0, opp2);
+    ok(t2.opponent.castleId === 1, 'all equal: the nearest is castle 1, got ' + t2.opponent.castleId);
+    return 'weakest castle wins; all-equal falls to nearest';
+  });
+
+  T('cpu', 'aims at the LOWEST standing block, and rubble is not cover', () => {
+    stWorld(['cpu', 'cpu']);
+    const cas = physics.castles[1];
+    const low = physics.lowestStanding(1);
+    ok(low && low.gy === 0, 'the aim point must be the bottom row, got gy=' + (low && low.gy));
+
+    const before = physics.countStanding(1);
+    const rec = physics.blocks.filter(b => b.castleId === 1 && b.gy === 1)[0];
+    const home = { x: rec.body.position.x, y: rec.body.position.y };
+
+    Body.setAngle(rec.body, 45 * Math.PI / 180);
+    ok(physics.isStanding(rec) === false, 'a block lying at 45 deg must not count as standing');
+    Body.setAngle(rec.body, 0);
+    ok(physics.isStanding(rec) === true, 'restoring the angle must restore standing');
+
+    Body.setPosition(rec.body, { x: home.x, y: cas.platformTopY - 4 });
+    ok(physics.isStanding(rec) === false,
+       'a block flat on the ground inside its own slice must NOT count as cover');
+    Body.setPosition(rec.body, { x: cas.footX1 + 200, y: home.y });
+    ok(physics.isStanding(rec) === false, 'a block knocked outside its castle slice is not cover');
+    Body.setPosition(rec.body, home);
+    Body.setAngle(rec.body, 0);
+    ok(physics.countStanding(1) === before, 'the count must come back');
+
+    // The bottom row rests exactly half a block above the platform and must
+    // still count — the slop tolerance exists for exactly this.
+    const bottom = physics.blocks.filter(b => b.castleId === 1 && b.gy === 0);
+    ok(bottom.every(b => physics.isStanding(b)), 'the bottom row must count as standing');
+    return 'lowest = gy 0; 45 deg, ground-level and out-of-slice all excluded';
+  });
+
+  T('cpu', 'a living opponent whose castle is gone is still a valid target', () => {
+    const opp = stWorld(['cpu', 'cpu']);
+    for (const rec of physics.blocks.filter(b => b.castleId === 1).slice()) physics.destroyBlock(rec);
+    ok(physics.countStanding(1) === 0, 'setup: castle 1 must be flattened');
+    ok(physics.lowestStanding(1) === null, 'no block should remain');
+
+    const t = cpu.chooseTarget(0, opp);
+    ok(t !== null, 'an empty target list was the CRASH this fallback exists to prevent');
+    ok(t.kind === 'character', 'with the castle gone the bot must aim at the character');
+    const ch = physics.charOf(1);
+    near(t.x, ch.body.position.x, 1e-6, 'aim x');
+    near(t.y, ch.body.position.y, 1e-6, 'aim y');
+    return 'castle gone -> aims at the character, never an empty list';
+  });
+
+  T('cpu', 'the longest required shot is solvable, and it lands where it aimed', () => {
+    const opp = stWorld(['cpu', 'cpu', 'cpu', 'cpu']);
+    const from = aim.launchPoint(physics.charOf(0));
+    const target = cpu.chooseTarget(0, opp.map(o => ({ ...o })));
+    ok(target, 'a target must exist');
+
+    // The genuinely longest shot: castle 0 -> castle 3.
+    const far = physics.castles[3];
+    const farBlock = physics.lowestStanding(3);
+    const t3 = { opponent: { castleId: 3 }, kind: 'block',
+                 x: farBlock.body.position.x, y: farBlock.body.position.y };
+    const sol = cpu.aimAt(from, t3);
+    ok(sol !== null, 'the 768 px shot must be solvable at MAX_SPEED');
+    ok(sol.v <= CONFIG.MAX_SPEED, 'solution speed exceeds MAX_SPEED');
+    const theta = cpu.refine(from.x, from.y, sol.v, sol.hi, sol.dirSign, t3);
+    const land = cpu.landingX(from.x, from.y, sol.v, theta, sol.dirSign, t3.y);
+    ok(land !== null, 'the solved shot never reached the target height');
+    ok(Math.abs(land - t3.x) < 4,
+       'solved shot lands ' + Math.abs(land - t3.x).toFixed(1) + ' px off — the solver drifted');
+    ok(Math.abs(far.centreX - physics.castles[0].centreX) > 700, 'setup: this is the long shot');
+    return 'castle 0 -> 3 (' + Math.round(Math.abs(far.centreX - physics.castles[0].centreX)) +
+           ' px): v=' + sol.v.toFixed(2) + ', lands ' + Math.abs(land - t3.x).toFixed(2) + ' px off';
+  });
+
+  T('cpu', 'out of range -> 45 degree fallback, never a skipped turn', () => {
+    const opp = stWorld(['cpu', 'cpu', 'cpu']);
+    const from = aim.launchPoint(physics.charOf(0));
+    ok(cpu.aimAt(from, { x: from.x + 1e6, y: from.y }) === null,
+       'an unreachable target must not produce a bogus solution');
+    ok(cpu.solveAngles(100000, 0, CONFIG.MAX_SPEED) === null, 'discriminant must go negative');
+
+    const savedMax = CONFIG.MAX_SPEED;
+    let d;
+    try {
+      CONFIG.MAX_SPEED = 1;                      // nothing at all is reachable
+      d = cpu.decide(0, opp, () => 0.5);         // 0.5 never trips the 12% silly branch
+    } finally { CONFIG.MAX_SPEED = savedMax; }
+
+    ok(d !== null, 'a skipped turn would strand the round manager');
+    ok(d.reason === 'fallback45', 'expected the 45 degree fallback, got ' + d.reason);
+    const ang = Math.atan2(-d.shot.vy, Math.abs(d.shot.vx)) * 180 / Math.PI;
+    near(ang, 45, 0.001, 'fallback elevation');
+    ok(isFinite(d.shot.vx) && isFinite(d.shot.vy) && d.shot.speed > 0, 'the fallback produced a real shot');
+
+    // And in a normal world every shooter always gets a shot.
+    const opp2 = stWorld(['cpu', 'cpu', 'cpu', 'cpu']);
+    const rnd = mulberry32(7);
+    for (let i = 0; i < 200; i++) {
+      const dd = cpu.decide(i % 4, opp2, rnd);
+      ok(dd !== null, 'decide() returned null on turn ' + i);
+      ok(isFinite(dd.shot.vx) && isFinite(dd.shot.vy), 'non-finite velocity on turn ' + i);
+      ok(dd.shot.speed >= CONFIG.MIN_SPEED - 1e-9 && dd.shot.speed <= CONFIG.MAX_SPEED + 1e-9,
+         'speed out of range: ' + dd.shot.speed);
+    }
+    return '45 deg at max power when nothing is reachable; 200 decisions, 0 skipped turns';
+  });
+
+  T('cpu', 'the silly shot fires about 12% of the time and lands on its own castle', () => {
+    const opp = stWorld(['cpu', 'cpu']);
+    const rnd = mulberry32(20260823);
+    const N = 4000;
+    let silly = 0;
+    for (let i = 0; i < N; i++) if (cpu.decide(0, opp, rnd).reason === 'silly') silly++;
+    const pct = silly / N * 100;
+    const want = CONFIG.CPU.sillyShotChance * 100;
+    ok(Math.abs(pct - want) < 2.0,
+       'silly shot fired ' + pct.toFixed(1) + '% over ' + N + ' trials, expected ~' + want + '%');
+
+    /* Angular error ALONE lands short or long on the correct side and
+       essentially never behind the shooter, so this is the only mechanism
+       that produces the self-demolition the product is partly about. It has
+       to actually come down on its own castle. */
+    const from = aim.launchPoint(physics.charOf(0));
+    const cas = physics.castles[0];
+    const rnd2 = mulberry32(99);
+    /* "On or beside its own castle" = inside its own platform, plus a block
+       of grace. Derived from CONFIG so retuning the band re-fails this. */
+    const ownLimit = world.platformWidth(cas.cols) / 2 + CONFIG.BLOCK.w;
+    let onOwn = 0, trials = 400, worstOff = 0;
+    for (let i = 0; i < trials; i++) {
+      const shot = cpu.sillyShot(1, rnd2);
+      const elev = Math.atan2(-shot.vy, Math.abs(shot.vx)) * 180 / Math.PI;
+      ok(elev >= CONFIG.CPU.sillyElevMinDeg - 0.001 && elev <= CONFIG.CPU.sillyElevMaxDeg + 0.001,
+         'silly elevation ' + elev.toFixed(1) + ' outside the band');
+      const land = cpu.landingX(from.x, from.y, shot.speed,
+                                Math.atan2(-shot.vy, Math.abs(shot.vx)), 1, cas.platformTopY, 900);
+      ok(land !== null, 'a silly shot never came back down');
+      const off = Math.abs(land - cas.centreX);
+      if (off > worstOff) worstOff = off;
+      if (off <= ownLimit) onOwn++;
+    }
+    ok(onOwn === trials,
+       'only ' + onOwn + '/' + trials + ' silly shots landed on or beside their own castle ' +
+       '(worst ' + worstOff.toFixed(0) + ' px vs limit ' + ownLimit.toFixed(0) + ')');
+    /* And the harder property: a silly shot must never be able to reach a
+       neighbour. At 4 players the nearest castle centre is one slice away. */
+    const halfSlice = CONFIG.WORLD_W / 4 / 2;
+    ok(worstOff < halfSlice,
+       'a silly shot can carry ' + worstOff.toFixed(0) + ' px, past the 4-player half-slice of ' +
+       halfSlice.toFixed(0) + ' — it could land on an opponent, which makes it a lucky shot');
+    return pct.toFixed(1) + '% over ' + N + ' trials; worst carry ' + worstOff.toFixed(0) +
+           ' px vs own-platform limit ' + ownLimit.toFixed(0) + ' and half-slice ' + halfSlice;
+  });
+
+  T('cpu', 'error injection stays inside its band and never leaves the speed range', () => {
+    const base = { vx: 10, vy: -10, speed: Math.hypot(10, 10) };
+    const baseAng = Math.atan2(base.vy, base.vx);
+    let maxDev = 0, minSpd = Infinity, maxSpd = -Infinity;
+    const rnd = mulberry32(4242);
+    for (let i = 0; i < 3000; i++) {
+      const e = cpu.applyError(base, rnd);
+      const dev = Math.abs(normAngle(Math.atan2(e.vy, e.vx) - baseAng)) * 180 / Math.PI;
+      if (dev > maxDev) maxDev = dev;
+      if (e.speed < minSpd) minSpd = e.speed;
+      if (e.speed > maxSpd) maxSpd = e.speed;
+      near(Math.hypot(e.vx, e.vy), e.speed, 1e-9, 'velocity magnitude must equal speed');
+    }
+    ok(maxDev <= CONFIG.CPU.angleErrDeg + 1e-6,
+       'angle deviated ' + maxDev.toFixed(2) + ' deg, band is +/-' + CONFIG.CPU.angleErrDeg);
+    ok(maxDev > CONFIG.CPU.angleErrDeg * 0.9, 'the error band is barely being used — is rnd wired in?');
+    ok(minSpd >= CONFIG.MIN_SPEED - 1e-9 && maxSpd <= CONFIG.MAX_SPEED + 1e-9, 'speed left its range');
+    ok(maxSpd <= base.speed * (1 + CONFIG.CPU.powerJitter) + 1e-9, 'power jitter exceeded its band');
+    // Difficulty is aim error, NEVER a damage multiplier.
+    ok(CONFIG.CPU.damageMultiplier === undefined && CONFIG.CPU.damageScale === undefined,
+       'a CPU damage multiplier has appeared — difficulty is aim error only');
+    return 'angle within +/-' + maxDev.toFixed(1) + ' deg of ' + CONFIG.CPU.angleErrDeg +
+           ', speed ' + minSpd.toFixed(2) + '-' + maxSpd.toFixed(2) + ', no damage multiplier';
+  });
+
+  T('cpu', 'the bot lines up with the same arc a human sees', () => {
+    stWorld(['cpu', 'human']);
+    const ch = physics.charOf(0);
+    aim.setShot(8, -12, Math.hypot(8, 12));
+    near(aim.velX, 8, 1e-9, 'velX');
+    near(aim.velY, -12, 1e-9, 'velY');
+    ok(aim.dragLen > 0 && aim.dragLen <= CONFIG.MAX_DRAG, 'drag length must be inside the gesture range');
+    near(aim.powerCurve(aim.dragLen), aim.speed, 1e-6,
+         'the drawn pull-back must map back to the speed the bot is about to use');
+    aim.rebuildArc(ch);
+    ok(aim.arcN > 1, 'the bot got no preview arc');
+    return 'setShot -> dragFor -> powerCurve round-trips; arc has ' + aim.arcN + ' points';
+  });
+
+  /* ---- render: motion ---- */
+  T('render', 'reduced motion disables SHAKE ONLY, not the game', () => {
+    const savedRM = render.reduceMotion, savedMag = render.shakeMag, savedUntil = render.shakeUntil;
+    try {
+      render.reduceMotion = false;
+      render.shakeMag = 0; render.shakeUntil = 0;
+      render.shake(9);
+      ok(render.shakeMag === 9, 'shake must work normally when reduced motion is off');
+
+      render.reduceMotion = true;
+      render.shakeMag = 0; render.shakeUntil = 0;
+      render.shake(9);
+      ok(render.shakeMag === 0, 'shake must be a no-op under prefers-reduced-motion');
+
+      /* It must NOT reach anything that carries game information. The plan is
+         explicit: trajectory dots, block motion and the exit wobble stay. */
+      const ch = physics.charOf(0) || physics.characters[0];
+      aim.setShot(6, -12, Math.hypot(6, 12));
+      aim.rebuildArc(ch);
+      ok(aim.arcN > 1, 'the trajectory preview must survive reduced motion');
+      render.clearPuffs();
+      render.puff(100, 200, '#fff', ch);
+      ok(render.puffs.some(q => q.on), 'the elimination puff must survive reduced motion');
+      render.clearPuffs();
+    } finally {
+      render.reduceMotion = savedRM; render.shakeMag = savedMag; render.shakeUntil = savedUntil;
+    }
+    return 'shake suppressed; arc, blocks and the exit wobble untouched';
+  });
+
+  T('render', 'an eliminated character leaves as the SAME silhouette', () => {
+    stWorld(['human', 'cpu']);
+    render.clearPuffs();
+    const bot = physics.charOf(1);
+    bot.facing = -1;
+    render.puff(bot.body.position.x, bot.body.position.y, '#43e6a5', bot);
+    const q = render.puffs.find(x => x.on);
+    ok(q, 'no puff was recorded');
+    ok(q.charId === bot.characterId,
+       'the wobble drew a ' + q.charId + ' for a ' + bot.characterId +
+       ' — an eliminated player must not leave as a different creature');
+    ok(q.charId === 'bolt', 'a CPU slot is the robot silhouette');
+    ok(q.facing === -1, 'facing must be carried over so the exit is not mirrored');
+    ok(typeof render.drawSilhouette === 'function',
+       'the live character and the wobble must share one silhouette function');
+    /* The body is already gone by the time the wobble is drawn: the exit is
+       cosmetic and cannot reach the settle predicate or the turn guards. */
+    ok(bot.eliminated === false, 'setup: puff() itself must not eliminate anyone');
+    physics.removeCharacter(bot);
+    ok(physics.dynamicBodies.indexOf(bot.body) < 0,
+       'an eliminated character must leave the physics world');
+    ok(render.puffs.some(x => x.on), 'and its puff must outlive its body');
+    render.clearPuffs();
+    return 'robot leaves as a robot, facing preserved, body already out of the world';
+  });
+
   /* ---- report ---- */
   const passed = results.filter(r => r.ok).length;
   const total = results.length;
@@ -2170,7 +4338,8 @@ function runSelftest() {
 }
 
 // Small surface for /qa and the perf gate. Not used by the game itself.
-window.CastleBlasters = { CONFIG, state, turns, physics, aim, world, view, players, perf };
+window.CastleBlasters = { CONFIG, STATES, state, turns, turnRules, physics, aim, cpu,
+                          world, view, players, render, ui, perf, parseSlots };
 
 boot();
 })();

@@ -3,7 +3,7 @@
 //
 // BUMP CACHE_VERSION ON EVERY DEPLOY, without exception.
 
-const CACHE_VERSION = 'castle-blasters-v1.0';
+const CACHE_VERSION = 'castle-blasters-v1.1';
 
 // -----------------------------------------------------------------------------
 // STRATEGY — 'network-first' through M3, flips to 'cache-first' at M4.
