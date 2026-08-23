@@ -500,6 +500,15 @@ says M1–M4 should do once a milestone is being kept.
 
 1. Are the four castles readable — can you tell the letters and numbers apart
    on the far castle from normal holding distance?
+
+   *Partly answered already, so you only have to judge the rest.* The type
+   size is not the risk: at 4 players the world scale is 1.0 on the reference
+   iPad, so a block is **7.7 mm** and its label has a **3.3 mm cap height** —
+   about twice newspaper body text (~1.6 mm) and comfortably over the ~2.5 mm
+   usually quoted for comfortable reading at arm's length. On a 10.9" or 11"
+   iPad it is larger still (scale 1.07–1.09). What is left to judge is
+   **composition, not legibility**: do four castles across one screen read as
+   four separate places, or as a row of clutter?
 2. Can you tell at a glance whose turn it is, and which characters are robots?
 3. Does a turn take under ~10 seconds, including the bot's think-and-aim beat?
 4. Does the match finish before round 8? (`CastleBlasters.turns.round`, or
