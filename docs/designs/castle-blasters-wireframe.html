@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<!-- Castle Blasters — rough wireframe. Layout only, not final art.
+     Palette + type constrained by DESIGN.md (Lilita One / Fredoka, ink #2a1a0a, cream #fff8e7).
+     Slot 2 colour #ffd700 is this game's permanent identity. -->
+<html lang="en"><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&family=Lilita+One&display=swap" rel="stylesheet">
+<style>
+  :root{ --ink:#2a1a0a; --cream:#fff8e7; --gold:#ffd700; --navy:#1a2555;
+         --p1:#2eb8ff; --blue:#2eb8ff; --mint:#43e6a5; --grape:#a86bff; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Fredoka',sans-serif;background:#e9e6df;padding:28px;color:var(--ink)}
+  h1{font-family:'Lilita One';font-size:26px;margin-bottom:4px}
+  .sub{font-size:13px;opacity:.6;margin-bottom:24px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:28px;max-width:1500px}
+  .screen{background:#fff;border:1px solid #bbb;border-radius:10px;overflow:hidden}
+  .cap{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+       padding:8px 12px;background:#f3f1ec;border-bottom:1px solid #ddd;opacity:.7}
+  .tab{position:relative;width:100%;aspect-ratio:4/3;background:#bfe3ff;overflow:hidden}
+  .note{font-size:11px;padding:8px 12px;background:#fffbe6;border-top:1px dashed #ccc;line-height:1.5}
+
+  /* ---------- shared world ---------- */
+  .sky{position:absolute;inset:0;background:linear-gradient(#a8dcff,#d9f0ff 70%,#cfeacd)}
+  .ground{position:absolute;left:0;right:0;bottom:0;height:16%;background:#7cb342;border-top:4px solid var(--ink)}
+  .blk{position:absolute;border:2px solid var(--ink);border-radius:3px;display:flex;
+       align-items:center;justify-content:center;font-family:'Lilita One';font-size:11px;color:var(--ink)}
+  .wood{background:#d9a05b} .stone{background:#b8b8b8} .ice{background:#9fe4ff}
+  .hero{position:absolute;width:32px;height:38px;border:2px solid var(--ink);border-radius:8px 8px 4px 4px}
+
+  /* ---------- HUD ---------- */
+  .hud{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;
+       align-items:flex-start;padding:8px;gap:8px}
+  .pill{background:var(--cream);border:2px solid var(--ink);border-radius:999px;
+        padding:3px 10px;font-size:11px;font-weight:700;box-shadow:0 2px 0 var(--ink)}
+  .hp{display:flex;gap:2px;margin-top:4px}
+  .heart{width:9px;height:9px;background:var(--p1);border:1.5px solid var(--ink);border-radius:2px}
+  .heart.off{background:#fff;opacity:.45}
+
+  /* ---------- overlays ---------- */
+  .ovl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+       justify-content:center;gap:10px;text-align:center;padding:14px}
+  .big{font-family:'Lilita One';font-size:30px;line-height:1}
+  .med{font-family:'Lilita One';font-size:17px}
+  .btn{background:var(--gold);border:3px solid var(--ink);border-radius:14px;
+       padding:10px 26px;font-family:'Lilita One';font-size:17px;box-shadow:0 4px 0 var(--ink)}
+  .btn.wide{padding:14px 44px;font-size:21px}
+  .sq{width:44px;height:44px;border:3px solid var(--ink);border-radius:12px;background:#fff;
+      display:flex;align-items:center;justify-content:center;font-family:'Lilita One';font-size:20px;
+      box-shadow:0 3px 0 var(--ink)}
+  .sq.on{background:var(--gold)}
+  .row{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap}
+  .slot{width:80px;border:3px solid var(--ink);border-radius:12px;background:#fff;padding:6px;
+        display:flex;flex-direction:column;align-items:center;gap:3px;box-shadow:0 3px 0 var(--ink)}
+  .av{width:34px;height:34px;border:2px solid var(--ink);border-radius:8px}
+  .tiny{font-size:9px;font-weight:700}
+  .toggle{display:flex;border:2px solid var(--ink);border-radius:999px;overflow:hidden;font-size:10px;font-weight:700}
+  .toggle span{padding:3px 9px;background:#fff}
+  .toggle span.on{background:var(--gold)}
+</style></head><body>
+
+<h1>Castle Blasters — screen wireframes</h1>
+<div class="sub">Rough layout only. Milestones M1–M5. Tablet landscape is the primary target.</div>
+
+<div class="grid">
+
+<!-- ============ 1. SETUP ============ -->
+<div class="screen"><div class="cap">1 · Setup (M3) — how many, who is a robot</div>
+<div class="tab"><div class="sky"></div><div class="ovl">
+  <div class="med">HOW MANY?</div>
+  <div class="row"><div class="sq on">2</div><div class="sq">3</div><div class="sq">4</div></div>
+  <div class="row" style="margin-top:6px">
+    <div class="slot"><div class="av" style="background:var(--p1)"></div><div class="tiny">P1</div>
+      <div class="toggle"><span class="on">KID</span><span>BOT</span></div></div>
+    <div class="slot"><div class="av" style="background:var(--mint)"></div><div class="tiny">P2</div>
+      <div class="toggle"><span>KID</span><span class="on">BOT</span></div></div>
+  </div>
+  <div class="btn wide" style="margin-top:4px">PLAY ▶</div>
+</div></div>
+<div class="note"><b>UX test §37 "How do I start?":</b> one number, then one tap per slot, then the
+big yellow button. No typing anywhere. Characters are auto-assigned by slot, there is no picker.
+Robot faces are visibly different from kid faces so a non-reader can tell who is who. Parent gear icon lives in a corner, not in this flow.</div></div>
+
+<!-- ============ 2. PLAY / AIM ============ -->
+<div class="screen"><div class="cap">2 · Play — aiming (M1, the whole bet)</div>
+<div class="tab"><div class="sky"></div><div class="ground"></div>
+  <!-- own castle L -->
+  <div class="blk wood" style="left:9%;bottom:16%;width:8%;height:9%">B</div>
+  <div class="blk wood" style="left:19%;bottom:16%;width:8%;height:9%">A</div>
+  <div class="blk stone" style="left:9%;bottom:25%;width:18%;height:8%">7</div>
+  <div class="hero" style="left:11%;bottom:33%;background:var(--p1)"></div>
+  <!-- enemy castle R -->
+  <div class="blk stone" style="right:9%;bottom:16%;width:8%;height:9%">C</div>
+  <div class="blk wood" style="right:19%;bottom:16%;width:8%;height:9%">D</div>
+  <div class="blk stone" style="right:9%;bottom:25%;width:18%;height:8%">3</div>
+  <div class="hero" style="right:11%;bottom:33%;background:var(--mint)"></div>
+  <!-- bonus target: an existing block on the OPPONENT's castle, glowing -->
+  <div class="blk stone" style="right:9%;bottom:25%;width:18%;height:8%;
+       box-shadow:0 0 0 4px rgba(255,215,0,.85);font-size:15px;z-index:2">7</div>
+  <!-- slingshot drag + dotted arc -->
+  <svg style="position:absolute;inset:0;width:100%;height:100%" viewBox="0 0 400 300" preserveAspectRatio="none">
+    <path d="M62 168 C 150 60, 260 70, 330 150" stroke="#2a1a0a" stroke-width="2.5"
+          stroke-dasharray="5 9" fill="none" stroke-linecap="round" opacity=".75"/>
+    <line x1="62" y1="168" x2="34" y2="196" stroke="#2a1a0a" stroke-width="3"/>
+    <circle cx="34" cy="196" r="9" fill="#2eb8ff" stroke="#2a1a0a" stroke-width="2.5"/>
+  </svg>
+  <div class="hud">
+    <div><div class="pill" style="background:var(--p1);color:var(--ink)">PLAYER 1</div>
+      <div class="hp"><i class="heart"></i><i class="heart"></i><i class="heart off"></i></div></div>
+    <div class="row" style="gap:6px"><div class="pill">ROUND 2</div><div class="pill" style="padding:3px 8px">⏸</div></div>
+    <div style="text-align:right"><div class="pill">⭐ 350</div>
+      <div class="pill" style="margin-top:4px;background:var(--gold)">🔊 HIT 7</div></div>
+  </div>
+</div>
+<div class="note"><b>One gesture (P2):</b> finger down anywhere in your slice of the
+world (not a small hotspot), pull back, the dotted arc updates live, lift to fire. Direction + distance = angle + power in a single touch.
+<b>Ambient learning (P4):</b> every block wears a letter or number all the time. The glowing block +
+"HIT 7" pill is the bonus target — always a block on an <i>opponent's</i> castle, so it can never
+collide with the "OOPS, own castle" rule. Missing it costs nothing. Three hearts, not a health bar,
+so damage is countable (§28). The <b>⏸</b> is the only mid-match affordance: it is the sole entry to
+PAUSED, to the parent settings panel, and to abandoning a match.</div></div>
+
+<!-- ============ 3. PASS DEVICE ============ -->
+<div class="screen"><div class="cap">3 · Turn result → pass the tablet (M2)</div>
+<div class="tab"><div class="sky" style="filter:saturate(.5) brightness(.9)"></div>
+<div class="ovl" style="background:rgba(26,37,85,.88);color:var(--cream)">
+  <div class="big" style="color:var(--gold)">🎉 GREAT JOB!</div>
+  <div class="med">PLAYER 1 &nbsp; +150</div>
+  <div style="width:60%;height:2px;background:rgba(255,255,255,.25);margin:2px 0"></div>
+  <div class="med">PASS THE TABLET ➡</div>
+  <div class="row">
+    <div class="av" style="width:52px;height:52px;background:var(--grape)"></div>
+    <div class="big">3</div>
+  </div>
+  <div class="btn wide">I'M READY!</div>
+</div></div>
+<div class="note"><b>P3, the important bit:</b> this screen is <i>skipped entirely</i> when the next
+player is a CPU, so a solo game never sees it. It is also the input firewall from §33 — the
+canvas stops accepting touches the instant the shot resolves, so a kid mashing the screen cannot
+fire twice or steal the next player's turn.</div></div>
+
+<!-- ============ 4. RESULTS ============ -->
+<div class="screen"><div class="cap">4 · Final results (M4) + printable poster (M5)</div>
+<div class="tab"><div class="sky"></div>
+<div class="ovl" style="background:rgba(26,37,85,.92);color:var(--cream);gap:7px">
+  <div class="big" style="color:var(--gold)">🏆 WINNER!</div>
+  <div class="row"><div class="av" style="width:46px;height:46px;background:var(--grape)"></div>
+    <div class="med">PLAYER 3 — 1,240</div></div>
+  <div class="row" style="font-size:11px;gap:14px;opacity:.9">
+    <span>🥈 P1 · 1,100</span><span>🥉 P2 · 980</span></div>
+  <div class="row" style="font-size:10px;gap:6px;margin-top:2px">
+    <span class="pill" style="color:var(--ink)">🏆 CHAMPION · P3</span>
+    <span class="pill" style="color:var(--ink)">💥 BIGGEST BOOM · P1</span>
+    <span class="pill" style="color:var(--ink)">🎯 GREAT AIM · P2</span></div>
+  <div class="row" style="margin-top:5px">
+    <div class="btn" style="font-size:13px;padding:8px 16px">PLAY AGAIN</div>
+    <div class="btn" style="font-size:13px;padding:8px 16px;background:#fff">🖨 POSTER</div>
+    <div class="btn" style="font-size:13px;padding:8px 16px;background:#fff">🏠</div>
+  </div>
+</div></div>
+<div class="note"><b>§24 everyone-gets-something:</b> every player gets exactly one award, assigned
+greedily. <b>🏆 CHAMPION always goes to the match winner, never to the high scorer</b> — the win
+condition is last-player-standing, so a score-based champion could print two different names on this
+one screen. Awards with a zero-valued stat are skipped in favour of 🎈 GOOD GAME.
+<b>🖨 POSTER</b> (M5) is Codex's idea — freeze the wreckage with <code>canvas.toDataURL()</code> and
+offer <b>print or save</b>; <code>window.print()</code> alone is unreliable from an installed iOS PWA.</div></div>
+
+</div></body></html>
